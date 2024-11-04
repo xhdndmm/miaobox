@@ -1,3 +1,7 @@
+#Python3.X
+#by xhdndmm & Seikoa
+#https://github.com/xhdndmm/miaobox
+
 import requests
 import os
 import sys
