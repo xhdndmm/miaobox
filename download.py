@@ -10,6 +10,10 @@ from tqdm import tqdm
 import hashlib
 import argparse
 import re
+from flask import render_template
+from flask import Flask
+
+app = Flask(__name__)
 
 class Downloader:
     def __init__(self, url, save_path, max_retries=3, language='en'):
@@ -127,5 +131,11 @@ def main():
         else:
             print(downloader.messages[args.language]['md5_mismatch'].format(args.md5, downloaded_md5))
 
+@app.route('/')
+def index():
+    return render_template('index.html')
+#哥们 帮我搞后端 我去搞前端了(xhdndmm)
+
 if __name__ == "__main__":
-    main()
+    app.run(host='127.0.0.1', port=80)
+    #main()

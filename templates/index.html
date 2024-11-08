@@ -1,0 +1,127 @@
+<!--by xhdndmm & Seikoa-->
+<!--https://github.com/xhdndmm/miaobox-->
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>miaobox</title>
+    <style>
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            text-align: center;
+            font-family: 'Noto Sans SC', sans-serif;
+            background-color: #f0f0f0;
+            background-image: url('https://xhdndmm.cn/data/wp.jpg');/*先用我自己网站的背景图吧(xhdndmm)*/
+            background-size: cover;
+            background-attachment: fixed;
+            margin: 0;
+            padding: 0;
+        }
+
+        .center {
+            max-width: 1200px;
+            margin: 80px auto 20px;
+            padding: 20px;
+            background-color: rgba(255, 255, 255, 0.3);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            border-radius: 10px;
+            opacity: 0;
+            transform: translateY(20px);
+            transition: opacity 1s ease, transform 1s ease;
+            position: relative;
+            z-index: 500;
+        }
+
+        .center.loaded {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .section {
+            display: none;
+            padding: 20px;
+            opacity: 0;
+            transition: opacity 0.5s ease-in-out;
+        }
+
+        .section.active {
+            display: block;
+            opacity: 1;
+        }
+
+        nav {
+            position: fixed;
+            top: 0;
+            width: 100%;
+            background-color: rgba(255, 255, 255, 0.5);
+            padding: 10px 0;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            z-index: 1000;
+        }
+
+        nav a {
+            margin: 0 15px;
+            color: #007bff;
+            text-decoration: none;
+            font-weight: bold;
+            transition: color 0.3s ease, transform 0.3s ease;
+        }
+
+        nav a:hover {
+            color: #0056b3;
+            transform: scale(1.1);
+        }
+
+        img {
+            border-radius: 10px;
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+        }
+
+        img:hover {
+            transform: scale(1.05);
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+        }
+
+        a {
+            color: #007bff;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        a:hover {
+            text-decoration: underline;
+            color: #0056b3;
+        }
+
+        @media (max-width: 768px) {
+            .center {
+                margin: 80px 10px 10px;
+                padding: 10px;
+            }
+        }
+
+        .shake:hover {
+            animation: shake 0.5s;
+        }
+    </style>
+</head>
+<body>
+    <nav>
+        <a href="#index">主页</a> |
+        <a href="#about">关于</a>
+    </nav>
+    <!--下面的东西先放着 有时间继续搞吧-->
+    <div class="center">
+        <div id="index" class="section" data-aos="fade-up">
+
+        </div>
+
+        <div id="about" class="section" data-aos="fade-up">
+
+        </div>
+    </div>
+</body>
+</html>
