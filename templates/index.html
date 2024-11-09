@@ -88,29 +88,8 @@
             transform: scale(1.1);
         }
     </style>
-</head>
-<body>
-    <nav>
-        <a href="#index">主页</a> |
-        <a href="#about">关于</a>
-    </nav>
 
-    <div class="center">
-        <div id="index" class="section active">
-            <h2>文件下载器</h2>
-            <input type="text" id="url" placeholder="请输入下载链接">
-            <br>
-            <button onclick="startDownload()">开始下载</button>
-            <button onclick="cancelDownload()">取消下载</button>
-            <p id="status">下载状态：等待中</p>
-        </div>
-
-        <div id="about" class="section">
-            <h2>关于</h2>
-            <p>这是一个简单的文件下载器应用，允许用户输入下载链接并启动文件下载。</p>
-        </div>
-    </div>
-
+    
     <script>
         function startDownload() {
             const url = document.getElementById('url').value;
@@ -168,5 +147,33 @@
             });
         }, 5000);  // 每5秒更新一次下载状态
     </script>
+
+</head>
+
+<body>
+    <!--有BUG 两个标签会在一块-->
+    <nav>
+        <a href="#index">主页</a> |
+        <a href="#about">关于</a>
+    </nav>
+
+    <div class="center">
+        <div id="index" class="section" data-aos="fade-up">
+            <h2>文件下载器</h2>
+            <input type="text" id="url" placeholder="请输入下载链接">
+            <br>
+            <button onclick="startDownload()">开始下载</button>
+            <button onclick="cancelDownload()">取消下载</button>
+            <p id="status">下载状态：等待中</p>
+        </div>
+
+        <div id="about" class="section" data-aos="fade-up">
+            <h2>关于</h2>
+            <p>这是一个简单的文件下载器应用，允许用户输入下载链接并启动文件下载。</p>
+            <a href="https://github.com/xhdndmm/miaobox">源码链接</a>
+            <p>开发人员名单</p>
+
+        </div>
+    </div>
 </body>
 </html>
