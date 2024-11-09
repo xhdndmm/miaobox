@@ -1,6 +1,8 @@
-#Python3.X
 #by xhdndmm & Seikoa
 #https://github.com/xhdndmm/miaobox
+#
+#开发环境：
+#xhdndmm:windows10_22h2,python_3.13
 
 import requests
 import os
@@ -141,7 +143,7 @@ def download_status():
     return jsonify({'status': 'No download started'})  # 无下载任务时返回
 
 def open_browser():
-    webbrowser.open("http://127.0.0.1:80")
+    webbrowser.open("http://127.0.0.1")
 
 if __name__ == "__main__":
     threading.Thread(target=open_browser).start()
