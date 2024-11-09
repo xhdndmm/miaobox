@@ -4,9 +4,8 @@
 <html>
 <head>
     <meta charset="utf-8">
-    <title>miaobox</title>
+    <title>miaobox - 文件下载器</title>
     <style>
-        /*CSS套用我网站(xhdndmm.cn)的CSS部分*/
         html {
             scroll-behavior: smooth;
         }
@@ -15,7 +14,7 @@
             text-align: center;
             font-family: 'Noto Sans SC', sans-serif;
             background-color: #f0f0f0;
-            background-image: url('https://xhdndmm.cn/data/wp.jpg');/*先用我自己网站的背景图吧(xhdndmm.cn)*/
+            background-image: url('https://xhdndmm.cn/data/wp.jpg');
             background-size: cover;
             background-attachment: fixed;
             margin: 0;
@@ -23,34 +22,47 @@
         }
 
         .center {
-            max-width: 1200px;
-            margin: 80px auto 20px;
+            max-width: 600px;
+            margin: 100px auto 20px;
             padding: 20px;
-            background-color: rgba(255, 255, 255, 0.3);
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            background-color: rgba(255, 255, 255, 0.8);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
             border-radius: 10px;
-            opacity: 0;
-            transform: translateY(20px);
-            transition: opacity 1s ease, transform 1s ease;
-            position: relative;
-            z-index: 500;
         }
 
-        .center.loaded {
-            opacity: 1;
-            transform: translateY(0);
+        h2 {
+            color: #333;
         }
 
-        .section {
-            display: none;
-            padding: 20px;
-            opacity: 0;
-            transition: opacity 0.5s ease-in-out;
+        input[type="text"] {
+            width: 80%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 16px;
         }
 
-        .section.active {
-            display: block;
-            opacity: 1;
+        button {
+            padding: 10px 20px;
+            margin: 10px 5px;
+            font-size: 16px;
+            cursor: pointer;
+            border: none;
+            border-radius: 5px;
+            background-color: #007bff;
+            color: #fff;
+            transition: background-color 0.3s ease;
+        }
+
+        button:hover {
+            background-color: #0056b3;
+        }
+
+        #status {
+            margin-top: 20px;
+            font-size: 16px;
+            color: #333;
         }
 
         nav {
@@ -75,38 +87,6 @@
             color: #0056b3;
             transform: scale(1.1);
         }
-
-        img {
-            border-radius: 10px;
-            transition: transform 0.3s ease, box-shadow 0.3s ease;
-        }
-
-        img:hover {
-            transform: scale(1.05);
-            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
-        }
-
-        a {
-            color: #007bff;
-            text-decoration: none;
-            transition: color 0.3s ease;
-        }
-
-        a:hover {
-            text-decoration: underline;
-            color: #0056b3;
-        }
-
-        @media (max-width: 768px) {
-            .center {
-                margin: 80px 10px 10px;
-                padding: 10px;
-            }
-        }
-
-        .shake:hover {
-            animation: shake 0.5s;
-        }
     </style>
 </head>
 <body>
@@ -116,13 +96,77 @@
     </nav>
 
     <div class="center">
-        <div id="index" class="section" data-aos="fade-up">
-            
+        <div id="index" class="section active">
+            <h2>文件下载器</h2>
+            <input type="text" id="url" placeholder="请输入下载链接">
+            <br>
+            <button onclick="startDownload()">开始下载</button>
+            <button onclick="cancelDownload()">取消下载</button>
+            <p id="status">下载状态：等待中</p>
         </div>
 
-        <div id="about" class="section" data-aos="fade-up">
-
+        <div id="about" class="section">
+            <h2>关于</h2>
+            <p>这是一个简单的文件下载器应用，允许用户输入下载链接并启动文件下载。</p>
         </div>
     </div>
+
+    <script>
+        function startDownload() {
+            const url = document.getElementById('url').value;
+            const statusElement = document.getElementById('status');
+            statusElement.innerText = '下载状态：正在开始下载...';
+
+            // 向后端发送POST请求以启动下载
+            fetch('/start_download', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ url: url })
+            })
+            .then(response => response.json())
+            .then(data => {
+                statusElement.innerText = `下载状态：${data.status}`;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                statusElement.innerText = '下载状态：下载启动失败';
+            });
+        }
+
+        function cancelDownload() {
+            const statusElement = document.getElementById('status');
+            statusElement.innerText = '下载状态：正在取消下载...';
+
+            // 向后端发送POST请求以取消下载
+            fetch('/cancel_download', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                statusElement.innerText = `下载状态：${data.status}`;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                statusElement.innerText = '下载状态：取消下载失败';
+            });
+        }
+
+        // 定时查询下载状态
+        setInterval(function() {
+            fetch('/download_status')
+            .then(response => response.json())
+            .then(data => {
+                document.getElementById('status').innerText = `下载状态：${data.status}`;
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+        }, 5000);  // 每5秒更新一次下载状态
+    </script>
 </body>
 </html>
