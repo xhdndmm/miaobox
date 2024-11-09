@@ -111,13 +111,14 @@
     <script>
         function startDownload() {
             const url = document.getElementById('url').value;
+            const path = document.getElementById('path').value;
             const statusElement = document.getElementById('status');
             statusElement.innerText = '下载状态：正在开始下载...';
 
             fetch('/start_download', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: url })
+                body: JSON.stringify({ url: url , path: path})
             })
             .then(response => response.json())
             .then(data => {
@@ -179,6 +180,8 @@
             <h2>文件下载器</h2>
             <input type="text" id="url" placeholder="请输入下载链接">
             <br>
+            <input type="text" id="path" placeholder="请输入下载路径（选填）">
+            <br>
             <button onclick="startDownload()">开始下载</button>
             <button onclick="cancelDownload()">取消下载</button>
             <p id="status">下载状态：等待中</p>
@@ -189,7 +192,7 @@
             <p>这是一个简单的文件下载器应用，允许用户输入下载链接并启动文件下载。</p>
             <a href="https://github.com/xhdndmm/miaobox">源码链接</a>
             <p>开发人员名单</p>
-            <a href="https://github.com/xhdndmm">xhdndmm</a>|<a href="https://github.com/Seikoa">Seikoa</a>|<a href="https://github.com/dsx120209">dsx120209</a>
+            <a href="https://github.com/xhdndmm">xhdndmm</a> | <a href="https://github.com/Seikoa">Seikoa</a> | <a href="https://github.com/dsx120209">dsx120209</a>
         </div>
     </div>
 </body>

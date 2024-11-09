@@ -21,14 +21,13 @@ downloader = None       # Downloader实例，用于控制下载任务
 class Downloader:
     """文件下载器类，负责执行下载任务并支持取消操作"""
 
-    def __init__(self, url, save_path, max_retries=3, language='en'):
-        """初始化下载器，设置下载URL、保存路径、最大重试次数和语言选项"""
+    def __init__(self, url, save_path, max_retries=3):
+        """初始化下载器，设置下载URL、保存路径、最大重试次数"""
         self.url = url
         self.save_path = save_path
         self.max_retries = max_retries
         self.cancelled = False  # 取消下载的标志
-        self.messages = {       # 提示消息字典
-            'en': {'download_cancelled': "Download cancelled.", 'downloaded': "Downloaded: {}"},
+        self.messages = {       # 提示消息字典,
             'zh': {'download_cancelled': "下载已取消。", 'downloaded': "已下载: {}"}
         }
 
@@ -82,7 +81,6 @@ def start_download():
     - url (str): 必填，文件下载链接
     - path (str): 可选，保存文件的本地路径，默认为当前目录
     - retries (int): 可选，下载失败重试次数，默认3次
-    - language (str): 可选，消息语言，支持 'en' 或 'zh'，默认为英文
 
     返回JSON对象，包括：
     - status (str): 下载状态信息，如 'Download started'
@@ -93,13 +91,14 @@ def start_download():
     url = request.json.get('url')
     save_path = request.json.get('path', './')
     retries = request.json.get('retries', 3)
-    language = request.json.get('language', 'en')
 
-    file_name = Downloader(url, '', retries, language).clean_filename(url)
+    file_name = Downloader(url, '', retries,).clean_filename(url)
     save_path = os.path.join(save_path, file_name)
 
+    #修了下路径的问题 但是BUG更多了 目前可以按照下载 但不填路径可能会不下载到当前目录下
+
     # 创建 Downloader 实例并启动下载线程
-    downloader = Downloader(url, save_path, retries, language)
+    downloader = Downloader(url, save_path, retries)
     download_thread = threading.Thread(target=downloader.start_download)
     download_thread.start()
     return jsonify({'status': 'Download started', 'file': file_name})
@@ -148,4 +147,4 @@ def open_browser():
 
 if __name__ == "__main__":
     threading.Thread(target=open_browser).start()
-    app.run(host='127.0.0.1', port=80)
+    app.run(host='127.0.0.1', port=80,debug=True)
