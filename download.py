@@ -10,10 +10,13 @@ from tqdm import tqdm
 import hashlib
 import argparse
 import re
-from flask import render_template
-from flask import Flask
+from flask import render_template, Flask, request, jsonify
 
 app = Flask(__name__)
+
+# 全局变量存储下载状态
+download_thread = None
+downloader = None
 
 class Downloader:
     def __init__(self, url, save_path, max_retries=3, language='en'):
@@ -30,7 +33,6 @@ class Downloader:
                 'max_retries_exceeded': "Max retries exceeded.",
                 'md5_matched': "MD5 checksum matched.",
                 'md5_mismatch': "MD5 checksum does not match! Expected: {}, Found: {}",
-                'cancel_prompt': "Type 'cancel' to cancel the download: ",
                 'progress_desc': "Downloading {}"
             },
             'zh': {
@@ -40,13 +42,11 @@ class Downloader:
                 'max_retries_exceeded': "超过最大重试次数。",
                 'md5_matched': "MD5 校验和匹配。",
                 'md5_mismatch': "MD5 校验和不匹配！预期: {}, 发现: {}",
-                'cancel_prompt': "输入 'cancel' 以取消下载: ",
                 'progress_desc': "正在下载 {}"
             }
         }
 
     def clean_filename(self, url):
-        # 使用正则表达式替换非法字符
         return re.sub(r'[<>:"/\\|?*]', '_', os.path.basename(url.split('?')[0]))
 
     def download(self):
@@ -87,55 +87,49 @@ class Downloader:
     def cancel_download(self):
         self.cancelled = True
 
-def calculate_md5(file_path):
-    hash_md5 = hashlib.md5()
-    with open(file_path, "rb") as f:
-        for chunk in iter(lambda: f.read(4096), b""):
-            hash_md5.update(chunk)
-    return hash_md5.hexdigest()
-
-def main():
-    parser = argparse.ArgumentParser(description="Download files with progress and error handling.")
-    parser.add_argument('url', type=str, help='The URL of the file to download')
-    parser.add_argument('--path', type=str, default='./', help='The path to save the downloaded file')
-    parser.add_argument('--retries', type=int, default=3, help='Number of retries on failure')
-    parser.add_argument('--md5', type=str, help='Expected MD5 checksum for file validation')
-    parser.add_argument('--language', type=str, choices=['en', 'zh'], default='en', help='Language for messages')
-
-    args = parser.parse_args()
-
-    # 清理文件名
-    file_name = Downloader(args.url, '', args.retries, args.language).clean_filename(args.url)
-    save_path = os.path.join(args.path, file_name)
-
-    downloader = Downloader(args.url, save_path, args.retries, args.language)
-
-    download_thread = threading.Thread(target=downloader.start_download)
-    download_thread.start()
-
-    try:
-        while download_thread.is_alive():
-            command = input(downloader.messages[args.language]['cancel_prompt'])
-            if command.lower() == 'cancel':
-                downloader.cancel_download()
-                download_thread.join()
-                break
-    except KeyboardInterrupt:
-        downloader.cancel_download()
-        download_thread.join()
-
-    if args.md5 and os.path.exists(save_path):
-        downloaded_md5 = calculate_md5(save_path)
-        if downloaded_md5 == args.md5:
-            print(downloader.messages[args.language]['md5_matched'])
-        else:
-            print(downloader.messages[args.language]['md5_mismatch'].format(args.md5, downloaded_md5))
-
 @app.route('/')
 def index():
     return render_template('index.html')
-#哥们 帮我搞后端 我去搞前端了(xhdndmm)
+
+@app.route('/start_download', methods=['POST'])
+def start_download():
+    global download_thread, downloader
+
+    url = request.json.get('url')
+    save_path = request.json.get('path', './')
+    retries = request.json.get('retries', 3)
+    language = request.json.get('language', 'en')
+
+    file_name = Downloader(url, '', retries, language).clean_filename(url)
+    save_path = os.path.join(save_path, file_name)
+
+    downloader = Downloader(url, save_path, retries, language)
+
+    download_thread = threading.Thread(target=downloader.start_download)
+    download_thread.start()
+    return jsonify({'status': 'Download started', 'file': file_name})
+
+@app.route('/cancel_download', methods=['POST'])
+def cancel_download():
+    global download_thread, downloader
+
+    if downloader:
+        downloader.cancel_download()
+        if download_thread.is_alive():
+            download_thread.join()
+        return jsonify({'status': 'Download cancelled'})
+    return jsonify({'status': 'No active download'})
+
+@app.route('/download_status', methods=['GET'])
+def download_status():
+    if download_thread and download_thread.is_alive():
+        return jsonify({'status': 'Downloading'})
+    elif downloader and downloader.cancelled:
+        return jsonify({'status': 'Cancelled'})
+    elif downloader:
+        return jsonify({'status': 'Completed'})
+    return jsonify({'status': 'No download started'})
 
 if __name__ == "__main__":
     app.run(host='127.0.0.1', port=80)
-    #main()
+
