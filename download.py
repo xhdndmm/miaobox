@@ -3,6 +3,7 @@
 #
 #开发环境：
 #xhdndmm:windows10_22h2,python_3.13
+#seikoa:windows10/11_22h2,python_3.13
 
 import requests
 import os
