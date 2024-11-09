@@ -5,7 +5,9 @@
 import requests
 import os
 import threading
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify , render_template
+import re
+import webbrowser
 
 app = Flask(__name__)
 
@@ -67,8 +69,7 @@ class Downloader:
 
 @app.route('/')
 def index():
-    """主页，用于简单展示服务的基本信息"""
-    return "Download Service"
+    return render_template('index.html')
 
 # API端点：启动下载
 @app.route('/start_download', methods=['POST'])
@@ -140,4 +141,5 @@ def download_status():
     return jsonify({'status': 'No download started'})  # 无下载任务时返回
 
 if __name__ == "__main__":
+    webbrowser.open("http://127.0.0.1/#index")
     app.run(host='127.0.0.1', port=80)
