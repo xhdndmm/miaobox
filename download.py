@@ -140,6 +140,9 @@ def download_status():
         return jsonify({'status': 'Completed'})
     return jsonify({'status': 'No download started'})  # 无下载任务时返回
 
+def open_browser():
+    webbrowser.open("http://127.0.0.1:80")
+
 if __name__ == "__main__":
-    webbrowser.open("http://127.0.0.1/#index")
+    threading.Thread(target=open_browser).start()
     app.run(host='127.0.0.1', port=80)
