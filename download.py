@@ -1,4 +1,4 @@
-#by xhdndmm & Seikoa & dsx120209
+#by xhdndmm & Seikoa
 #https://github.com/xhdndmm/miaobox
 #
 #开发环境：
