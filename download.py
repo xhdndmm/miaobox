@@ -24,7 +24,7 @@ lock = threading.Lock()  # 线程锁
 # 配置类
 class Config:
     LOG_FILE = "miaobox_log.log"
-    SAVE_PATH = os.path.expanduser("~/Downloads")
+    SAVE_PATH = os.path.expanduser("~\Downloads")
     MAX_RETRIES = 3
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
 
@@ -43,7 +43,11 @@ class Downloader:
 
     def __init__(self, url, save_path, max_retries=3, user_agent=None):
         self.url = url  # 下载链接
-        self.save_path = save_path or app.config['SAVE_PATH']  # 保存路径
+        if not os.path.exists(app.config[Config.SAVE_PATH]):
+            os.makedirs(app.config[Config.SAVE_PATH], exist_ok=True)
+        if save_path == "" :
+            save_path = Config.SAVE_PATH
+        self.save_path = save_path or app.config[save_path] # 保存路径
         self.max_retries = max_retries  # 最大重试次数
         self.cancelled = False  # 取消下载的标志
         self.user_agent = user_agent or app.config['USER_AGENT']  # 使用默认的 UA
@@ -53,10 +57,17 @@ class Downloader:
         """从 Content-Disposition 中提取文件名"""
         cd = response.headers.get("Content-Disposition")
         if cd:
-            filename_match = re.findall(r'filename="(.+)"', cd)
+            filename_match = re.findall(r'filename\*?=(?:[a-zA-Z0-9\'-]+\'\')?(.+)', cd)
             if filename_match:
-                return filename_match[0]
+                filename = filename_match[0]
+                try:
+                    # 解码 URL 编码的文件名（适用于 filename*）
+                    return requests.utils.unquote(filename).encode('latin1').decode('utf-8')
+                except UnicodeDecodeError:
+                    pass
+                return filename
         return default_name
+
 
     @staticmethod
     def sanitize_filename(filename):
