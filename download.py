@@ -6,6 +6,29 @@
 #xhdndmm:windows10_22h2,python_3.13
 #seikoa:windows10/11_22h2,python_3.13
 
+"""
+                   _ooOoo_
+                  o8888888o
+                  88" . "88
+                  (| -_- |)
+                  O\  =  /O
+               ____/`---'\____
+             .'  \\|     |//  `.
+            /  \\|||  :  |||//  \
+           /  _||||| -:- |||||-  \
+           |   | \\\  -  /// |   |
+           | \_|  ''\---/''  |   |
+           \  .-\__  `-`  ___/-. /
+         ___`. .'  /--.--\  `. . __
+      ."" '<  `.___\_<|>_/___.'  >'"".
+     | | :  `- \`.;`\ _ /`;.`/ - ` : | |
+     \  \ `-.   \_ __\ /__ _/   .-` /  /
+======`-.____`-.___\_____/___.-`____.-'======
+                   `=---='
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+            佛祖保佑       永无BUG
+"""
+
 import os
 import threading
 import logging
@@ -24,7 +47,7 @@ lock = threading.Lock()  # 线程锁
 # 配置类
 class Config:
     LOG_FILE = "miaobox_log.log"
-    SAVE_PATH = os.path.expanduser("~\Downloads")
+    SAVE_PATH = os.path.join(os.path.expanduser("~"), "Downloads")  # 默认下载路径
     MAX_RETRIES = 3
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
 
@@ -39,35 +62,28 @@ logging.basicConfig(
 )
 
 class Downloader:
-    """文件下载器类"""
-
-    def __init__(self, url, save_path, max_retries=3, user_agent=None):
-        self.url = url  # 下载链接
-        if not os.path.exists(app.config[Config.SAVE_PATH]):
-            os.makedirs(app.config[Config.SAVE_PATH], exist_ok=True)
-        if save_path == "" :
-            save_path = Config.SAVE_PATH
-        self.save_path = save_path or app.config[save_path] # 保存路径
-        self.max_retries = max_retries  # 最大重试次数
-        self.cancelled = False  # 取消下载的标志
-        self.user_agent = user_agent or app.config['USER_AGENT']  # 使用默认的 UA
+    def __init__(self, url, save_path=None, max_retries=3, user_agent=None):
+        self.url = url
+        self.save_path = os.path.abspath(save_path or app.config["SAVE_PATH"])  # 转为绝对路径
+        if not os.path.exists(self.save_path):
+            os.makedirs(self.save_path, exist_ok=True)  # 创建目录
+        self.max_retries = max_retries
+        self.cancelled = False
+        self.user_agent = user_agent or app.config["USER_AGENT"]
 
     @staticmethod
     def extract_filename(response, default_name="downloaded_file"):
-        """从 Content-Disposition 中提取文件名"""
         cd = response.headers.get("Content-Disposition")
         if cd:
-            filename_match = re.findall(r'filename\*?=(?:[a-zA-Z0-9\'-]+\'\')?(.+)', cd)
+            filename_match = re.findall(r"filename\*=(?:UTF-8'')?(.+)", cd)
+            if not filename_match:
+                filename_match = re.findall(r'filename="(.+)"', cd)
             if filename_match:
-                filename = filename_match[0]
                 try:
-                    # 解码 URL 编码的文件名（适用于 filename*）
-                    return requests.utils.unquote(filename).encode('latin1').decode('utf-8')
-                except UnicodeDecodeError:
-                    pass
-                return filename
+                    return requests.utils.unquote(filename_match[0]).encode("latin1").decode("utf-8")
+                except (UnicodeDecodeError, UnicodeEncodeError):
+                    return requests.utils.unquote(filename_match[0])
         return default_name
-
 
     @staticmethod
     def sanitize_filename(filename):
@@ -83,31 +99,31 @@ class Downloader:
     def download(self):
         """下载文件，支持取消和进度显示"""
         headers = {
-            "User-Agent": self.user_agent  # 使用固定的 User-Agent
+            "User-Agent": self.user_agent
         }
         with requests.get(self.url, stream=True, headers=headers) as response:
             response.raise_for_status()
             filename = self.clean_filename(self.url, response)
-            self.save_path = os.path.join(os.path.dirname(self.save_path), filename)
+            file_path = os.path.join(self.save_path, filename)  # 确保保存到正确的目录
             total_size = int(response.headers.get('content-length', 0))
             progress = tqdm(total=total_size, unit='B', unit_scale=True, disable=None)
-            with open(self.save_path, 'wb') as file:
+            with open(file_path, 'wb') as file:
                 for data in response.iter_content(chunk_size=4096):
                     if self.cancelled:
                         progress.close()
-                        logging.info("下载取消：%s", self.save_path)
+                        logging.info("下载取消：%s", file_path)
                         return
                     file.write(data)
                     progress.update(len(data))
             progress.close()
-            logging.info("下载完成：%s", self.save_path)
+            logging.info("下载完成：%s", file_path)
             
     def start_download(self):
         """启动下载，支持多次重试"""
         attempts = 0
         while attempts < self.max_retries:
             try:
-                self.download()  # 执行下载
+                self.download()
                 break
             except requests.exceptions.RequestException as e:
                 attempts += 1
@@ -120,18 +136,15 @@ class Downloader:
         """取消当前下载任务"""
         self.cancelled = True
 
-
 def is_valid_url(url):
     """验证 URL 合法性"""
     parsed = urlparse(url)
     return bool(parsed.netloc) and bool(parsed.scheme)
 
-
 @app.route('/')
 def index():
     """渲染主页面"""
     return render_template('index.html')
-
 
 @app.route('/start_download', methods=['POST'])
 def start_download():
@@ -142,11 +155,16 @@ def start_download():
             return jsonify({'status': 'Error', 'message': 'A download is already in progress'}), 409
         try:
             url = request.json.get('url')
-            save_path = request.json.get('path') or app.config['SAVE_PATH']
+            user_path = request.json.get('path')  # 用户传入的路径
+            save_path = os.path.abspath(user_path) if user_path else app.config["SAVE_PATH"]
             retries = request.json.get('retries', app.config['MAX_RETRIES'])
 
             if not is_valid_url(url):
                 return jsonify({'status': 'Error', 'message': 'Invalid URL'}), 400
+
+            # 确保路径存在
+            if not os.path.exists(save_path):
+                os.makedirs(save_path, exist_ok=True)
 
             downloader = Downloader(url, save_path, retries)
             download_thread = threading.Thread(target=downloader.start_download, daemon=True)
@@ -155,7 +173,6 @@ def start_download():
         except Exception as e:
             logging.error("启动下载失败：%s", e)
             return jsonify({'status': 'Error', 'message': str(e)}), 500
-
 
 @app.route('/cancel_download', methods=['POST'])
 def cancel_download():
@@ -169,7 +186,6 @@ def cancel_download():
         return jsonify({'status': 'Download cancelled'})
     return jsonify({'status': 'No active download'})
 
-
 @app.route('/download_status', methods=['GET'])
 def download_status():
     """查询下载状态"""
@@ -180,12 +196,18 @@ def download_status():
         return jsonify({'status': status, 'file': file_name})
     return jsonify({'status': 'No download started'})
 
-
 def open_browser():
     """自动打开浏览器"""
     webbrowser.open("http://127.0.0.1")
 
-
 if __name__ == "__main__":
+    # 确保默认保存路径存在
+    default_save_path = app.config['SAVE_PATH']
+    try:
+        if not os.path.exists(default_save_path):
+            os.makedirs(default_save_path, exist_ok=True)
+        print(f"默认保存路径已准备好: {default_save_path}")
+    except Exception as e:
+        print(f"无法创建默认保存路径: {e}")
     threading.Thread(target=open_browser, daemon=True).start()
     app.run(host='127.0.0.1', port=80, debug=True, threaded=True)  # 启动 Flask 服务
