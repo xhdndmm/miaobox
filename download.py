@@ -210,4 +210,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"无法创建默认保存路径: {e}")
     threading.Thread(target=open_browser, daemon=True).start()
-    app.run(host='127.0.0.1', port=80, debug=True, threaded=True)  # 启动 Flask 服务
+    app.run(host='127.0.0.1', port=80, debug=False, threaded=True)  # 启动 Flask 服务
