@@ -3,7 +3,7 @@
 #使用chatgpt辅助制作
 #
 #开发环境：
-#xhdndmm:windows10_22h2,python_3.13
+#xhdndmm:windows11_24h2,python_3.12.8
 #seikoa:windows10/11_22h2,python_3.13
 
 """
@@ -210,4 +210,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"无法创建默认保存路径: {e}")
     threading.Thread(target=open_browser, daemon=True).start()
-    app.run(host='127.0.0.1', port=80, debug=False, threaded=True)  # 启动 Flask 服务
+    app.run(host='127.0.0.1', port=80, debug=True, threaded=True)  # 启动 Flask 服务
