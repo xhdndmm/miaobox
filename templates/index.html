@@ -1,5 +1,3 @@
-<!--by xhdndmm & Seikoa-->
-<!--用chatgpt辅助制作-->
 <!--[https://github.com/xhdndmm/miaobox]-->
 
 <!DOCTYPE html>
@@ -44,13 +42,43 @@
             font-size: 14px;
             color: #555;
         }
+        #progress-container {
+            display: none;
+            width: 80%;
+            margin: 10px auto;
+            background: #f3f3f3;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        #progress-bar {
+            width: 0;
+            height: 20px;
+            background: #007bff;
+            border-radius: 4px;
+        }
+        .error {
+            color: red;
+        }
+        a {
+            color: #007bff;
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
     </style>
     <script>
+        function updateProgress(percentage) {
+            const progressBar = document.getElementById('progress-bar');
+            progressBar.style.width = percentage + '%';
+        }
+
         function startDownload() {
             const url = document.getElementById('url').value;
             const path = document.getElementById('path').value || "";
             const status = document.getElementById('status');
             status.innerText = "下载状态：正在启动下载...";
+            status.classList.remove('error');
+            const progressContainer = document.getElementById('progress-container');
+            progressContainer.style.display = 'block';
 
             fetch('/start_download', {
                 method: 'POST',
@@ -67,15 +95,31 @@
             })
             .then(data => {
                 status.innerText = `下载状态：${data.status}，文件名：${data.file}`;
+                if (data.status === 'Download started') {
+                    const interval = setInterval(() => {
+                        fetch('/download_status')
+                            .then(response => response.json())
+                            .then(statusData => {
+                                if (statusData.status === 'Downloading') {
+                                    updateProgress(statusData.progress);
+                                } else {
+                                    clearInterval(interval);
+                                    progressContainer.style.display = 'none';
+                                }
+                            });
+                    }, 1000);
+                }
             })
             .catch(err => {
                 status.innerText = `下载状态：错误 - ${err.message}`;
+                status.classList.add('error');
             });
         }
 
         function cancelDownload() {
             const status = document.getElementById('status');
             status.innerText = "下载状态：正在取消下载...";
+            status.classList.remove('error');
             fetch('/cancel_download', { method: 'POST' })
                 .then(response => response.json())
                 .then(data => {
@@ -83,19 +127,24 @@
                 })
                 .catch(() => {
                     status.innerText = "取消失败";
+                    status.classList.add('error');
                 });
         }
     </script>
 </head>
 <body>
     <div class="container">
-        <h2>文件下载器</h2>
+        <h2>miaobox - 文件下载器</h2>
         <input type="text" id="url" placeholder="请输入下载链接">
         <input type="text" id="path" placeholder="请输入保存路径（选填）">
         <br>
         <button onclick="startDownload()">开始下载</button>
         <button onclick="cancelDownload()">取消下载</button>
+        <div id="progress-container">
+            <div id="progress-bar"></div>
+        </div>
         <p id="status">下载状态：等待中</p>
+        <a href="https://github.com/xhdndmm/miaobox">源码仓库</a>
     </div>
 </body>
 </html>

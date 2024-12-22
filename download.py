@@ -1,10 +1,4 @@
-#by xhdndmm & Seikoa
 #https://github.com/xhdndmm/miaobox
-#使用chatgpt辅助制作
-#
-#开发环境：
-#xhdndmm:windows11_24h2,python_3.12.8
-#seikoa:windows10/11_22h2,python_3.13
 
 """
                    _ooOoo_
@@ -32,7 +26,7 @@
 import os
 import threading
 import logging
-from flask import Flask, request, jsonify, render_template
+from flask import Flask, request, jsonify, render_template, Response
 import requests
 from tqdm import tqdm
 import re
@@ -49,7 +43,7 @@ class Config:
     LOG_FILE = "miaobox_log.log"
     SAVE_PATH = os.path.join(os.path.expanduser("~"), "Downloads")  # 默认下载路径
     MAX_RETRIES = 3
-    USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
+    USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0" #自定义UA信息伪装正常用户
 
 app.config.from_object(Config)
 
@@ -106,6 +100,7 @@ class Downloader:
             filename = self.clean_filename(self.url, response)
             file_path = os.path.join(self.save_path, filename)  # 确保保存到正确的目录
             total_size = int(response.headers.get('content-length', 0))
+            downloaded_size = 0
             progress = tqdm(total=total_size, unit='B', unit_scale=True, disable=None)
             with open(file_path, 'wb') as file:
                 for data in response.iter_content(chunk_size=4096):
@@ -114,10 +109,18 @@ class Downloader:
                         logging.info("下载取消：%s", file_path)
                         return
                     file.write(data)
+                    downloaded_size += len(data)
                     progress.update(len(data))
+                    self.update_progress(downloaded_size, total_size)
             progress.close()
             logging.info("下载完成：%s", file_path)
-            
+
+    def update_progress(self, downloaded_size, total_size):
+        """更新下载进度"""
+        progress_percentage = (downloaded_size / total_size) * 100
+        with app.app_context():
+            app.config['PROGRESS'] = progress_percentage
+
     def start_download(self):
         """启动下载，支持多次重试"""
         attempts = 0
@@ -193,12 +196,13 @@ def download_status():
     if downloader and not downloader.cancelled:
         file_name = os.path.basename(downloader.save_path)
         status = "Downloading" if download_thread.is_alive() else "Completed"
-        return jsonify({'status': status, 'file': file_name})
+        progress = app.config.get('PROGRESS', 0)
+        return jsonify({'status': status, 'file': file_name, 'progress': progress})
     return jsonify({'status': 'No download started'})
 
 def open_browser():
     """自动打开浏览器"""
-    webbrowser.open("http://127.0.0.1")
+    webbrowser.open("http://localhost/")
 
 if __name__ == "__main__":
     # 确保默认保存路径存在
@@ -210,4 +214,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"无法创建默认保存路径: {e}")
     threading.Thread(target=open_browser, daemon=True).start()
-    app.run(host='127.0.0.1', port=80, debug=True, threaded=True)  # 启动 Flask 服务
+    app.run(host='0.0.0.0', port=80, debug=True, threaded=True)  # 启动 Flask 服务 并且可以局域网访问
