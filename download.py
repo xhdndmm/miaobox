@@ -13,6 +13,7 @@ import magic
 from pathvalidate import sanitize_filename
 import hashlib
 from datetime import datetime
+import time
 
 app = Flask(__name__)
 download_thread = None
@@ -36,6 +37,7 @@ class Config:
         'video/mp4', 'video/webm', 'video/x-msvideo'
     }
     DOWNLOAD_TIMEOUT = 30  # 下载超时时间（秒）
+    PROGRESS_UPDATE_INTERVAL = 0.1  # 进度更新间隔（秒）
 
 app.config.from_object(Config)
 
@@ -56,6 +58,9 @@ class Downloader:
         self.cancelled = False
         self.user_agent = user_agent or app.config["USER_AGENT"]
         self.mime = magic.Magic(mime=True)
+        # 初始化进度相关变量
+        self.last_update_time = time.time()
+        self.last_downloaded_size = 0
 
     def is_safe_path(self, path):
         """验证保存路径的安全性"""
@@ -158,9 +163,36 @@ class Downloader:
 
     def update_progress(self, downloaded_size, total_size):
         """更新下载进度"""
-        progress_percentage = (downloaded_size / total_size) * 100
-        with app.app_context():
-            app.config['PROGRESS'] = progress_percentage
+        try:
+            progress_percentage = (downloaded_size / total_size) * 100 if total_size > 0 else 0
+            
+            # 计算下载速度
+            current_time = time.time()
+            if hasattr(self, 'last_update_time') and hasattr(self, 'last_downloaded_size'):
+                time_diff = current_time - self.last_update_time
+                size_diff = downloaded_size - self.last_downloaded_size
+                speed = size_diff / time_diff if time_diff > 0 else 0
+                
+                # 计算剩余时间
+                remaining_size = total_size - downloaded_size
+                eta = remaining_size / speed if speed > 0 else 0
+                
+                # 更新进度信息
+                with app.app_context():
+                    app.config['PROGRESS'] = {
+                        'percentage': progress_percentage,
+                        'downloaded': format_size(downloaded_size),
+                        'total': format_size(total_size),
+                        'speed': format_size(speed) + '/s',
+                        'eta': format_time(eta)
+                    }
+            
+            # 保存当前状态用于下次计算
+            self.last_update_time = current_time
+            self.last_downloaded_size = downloaded_size
+            
+        except Exception as e:
+            logging.error(f"更新进度时出错：{e}")
 
     def start_download(self):
         """启动下载，支持多次重试"""
@@ -203,10 +235,110 @@ class VideoDownloader:
         self.user_agent = user_agent or app.config["USER_AGENT"]
         self.current_filename = None
         self.cookies_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+        # 初始化进度相关变量
+        self.last_update_time = time.time()
+        self.last_downloaded_bytes = 0
+        self.download_speed = 0
+        self.total_bytes = 0
+        self.downloaded_bytes = 0
 
     def is_bilibili_url(self, url):
         """检查是否为B站URL"""
         return 'bilibili.com' in url or 'b23.tv' in url
+
+    def clean_temp_files(self, base_filename):
+        """清理临时文件和非mp4文件"""
+        try:
+            dir_path = os.path.dirname(base_filename)
+            filename_without_ext = os.path.splitext(os.path.basename(base_filename))[0]
+            
+            # 获取目录下所有相关文件
+            for file in os.listdir(dir_path):
+                if file.startswith(filename_without_ext):
+                    filepath = os.path.join(dir_path, file)
+                    # 保留mp4文件，删除其他文件
+                    if not file.endswith('.mp4'):
+                        try:
+                            os.remove(filepath)
+                            logging.info(f"已删除临时文件：{filepath}")
+                        except Exception as e:
+                            logging.error(f"删除文件失败：{filepath}, 错误：{e}")
+        except Exception as e:
+            logging.error(f"清理临时文件时出错：{e}")
+
+    def update_progress(self, downloaded_bytes, total_bytes, speed=None, eta=None):
+        """更新下载进度"""
+        try:
+            # 更新字节计数
+            self.downloaded_bytes = downloaded_bytes
+            self.total_bytes = total_bytes or self.total_bytes  # 保留之前的总大小如果新值为0
+
+            # 计算下载速度
+            current_time = time.time()
+            time_diff = current_time - self.last_update_time
+            if time_diff >= 1:  # 每秒更新一次速度
+                bytes_diff = downloaded_bytes - self.last_downloaded_bytes
+                self.download_speed = bytes_diff / time_diff
+                self.last_update_time = current_time
+                self.last_downloaded_bytes = downloaded_bytes
+
+            # 使用传入的速度，如果没有则使用计算的速度
+            current_speed = speed or self.download_speed
+
+            # 计算进度百分比
+            if self.total_bytes > 0:
+                progress_percentage = (self.downloaded_bytes / self.total_bytes) * 100
+                
+                # 如果没有提供eta，则计算
+                if not eta and current_speed > 0:
+                    remaining_bytes = self.total_bytes - self.downloaded_bytes
+                    eta = remaining_bytes / current_speed
+
+                # 更新进度信息
+                with app.app_context():
+                    app.config['PROGRESS'] = {
+                        'percentage': progress_percentage,
+                        'downloaded': format_size(self.downloaded_bytes),
+                        'total': format_size(self.total_bytes),
+                        'speed': format_size(current_speed) + '/s',
+                        'eta': format_time(eta) if eta else '计算中...'
+                    }
+
+                # 记录日志
+                logging.info(
+                    f"下载进度: {progress_percentage:.1f}%, "
+                    f"速度: {format_size(current_speed)}/s, "
+                    f"已下载: {format_size(self.downloaded_bytes)}/{format_size(self.total_bytes)}"
+                )
+
+        except Exception as e:
+            logging.error(f"更新进度时出错：{e}")
+
+    def progress_hook(self, d):
+        """处理下载进度回调"""
+        try:
+            if d['status'] == 'downloading':
+                self.current_filename = d.get('filename')
+                total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+                downloaded_bytes = d.get('downloaded_bytes', 0)
+                speed = d.get('speed', 0)
+                eta = d.get('eta', 0)
+                
+                # 使用update_progress方法更新进度
+                self.update_progress(downloaded_bytes, total_bytes, speed, eta)
+
+            elif d['status'] == 'finished':
+                logging.info(f"视频下载完成：{self.current_filename}")
+                # 在下载完成后清理临时文件
+                if self.current_filename:
+                    self.clean_temp_files(self.current_filename)
+                    
+            elif d['status'] == 'error':
+                error_message = d.get('error', '未知错误')
+                logging.error(f"下载出错：{error_message}")
+                
+        except Exception as e:
+            logging.error(f"处理进度回调时出错：{e}")
 
     def download(self):
         ydl_opts = {
@@ -263,26 +395,6 @@ class VideoDownloader:
                 logging.error(f"视频下载失败：{e}")
             raise
 
-    def progress_hook(self, d):
-        if d['status'] == 'downloading':
-            self.current_filename = d.get('filename')
-            total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
-            downloaded_bytes = d.get('downloaded_bytes', 0)
-            
-            if total_bytes > 0:
-                progress_percentage = (downloaded_bytes / total_bytes) * 100
-                with app.app_context():
-                    app.config['PROGRESS'] = progress_percentage
-                    
-            # 记录下载速度和剩余时间
-            speed = d.get('speed', 0)
-            eta = d.get('eta', 0)
-            if speed and eta:
-                logging.info(f"下载速度: {speed/1024/1024:.2f}MB/s, 预计剩余时间: {eta}秒")
-
-        elif d['status'] == 'finished':
-            logging.info(f"视频下载完成：{self.current_filename}")
-
     def start_download(self):
         try:
             self.download()
@@ -297,6 +409,26 @@ def is_valid_url(url):
     """验证 URL 合法性"""
     parsed = urlparse(url)
     return bool(parsed.netloc) and bool(parsed.scheme)
+
+def format_size(size):
+    """格式化文件大小显示"""
+    for unit in ['B', 'KB', 'MB', 'GB']:
+        if size < 1024:
+            return f"{size:.2f}{unit}"
+        size /= 1024
+    return f"{size:.2f}TB"
+
+def format_time(seconds):
+    """格式化时间显示"""
+    if seconds < 60:
+        return f"{seconds:.0f}秒"
+    elif seconds < 3600:
+        minutes = seconds / 60
+        return f"{minutes:.0f}分钟"
+    else:
+        hours = seconds / 3600
+        minutes = (seconds % 3600) / 60
+        return f"{hours:.0f}小时{minutes:.0f}分钟"
 
 @app.route('/')
 def index():
@@ -371,9 +503,19 @@ def download_status():
     global downloader
     if downloader and not downloader.cancelled:
         file_name = os.path.basename(downloader.save_path)
-        status = "Downloading" if download_thread.is_alive() else "Completed"
-        progress = app.config.get('PROGRESS', 0)
-        return jsonify({'status': status, 'file': file_name, 'progress': progress})
+        status = "Downloading" if download_thread and download_thread.is_alive() else "Completed"
+        progress = app.config.get('PROGRESS', {
+            'percentage': 0,
+            'downloaded': '0B',
+            'total': '0B',
+            'speed': '0B/s',
+            'eta': '未知'
+        })
+        return jsonify({
+            'status': status,
+            'file': file_name,
+            'progress': progress
+        })
     return jsonify({'status': 'No download started'})
 
 def open_browser():

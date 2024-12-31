@@ -46,15 +46,38 @@
             display: none;
             width: 80%;
             margin: 10px auto;
+            padding: 10px;
             background: #f3f3f3;
-            border-radius: 4px;
+            border-radius: 8px;
+        }
+        #progress-bar-container {
+            width: 100%;
+            height: 20px;
+            background: #e0e0e0;
+            border-radius: 10px;
             overflow: hidden;
+            margin-bottom: 10px;
         }
         #progress-bar {
             width: 0;
-            height: 20px;
-            background: #007bff;
-            border-radius: 4px;
+            height: 100%;
+            background: linear-gradient(90deg, #007bff, #00a6ff);
+            border-radius: 10px;
+            transition: width 0.3s ease-in-out;
+        }
+        .progress-details {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+        }
+        .progress-item {
+            text-align: center;
+        }
+        .progress-label {
+            font-weight: bold;
+            margin-right: 5px;
         }
         .error {
             color: red;
@@ -82,9 +105,24 @@
         }
     </style>
     <script>
-        function updateProgress(percentage) {
+        function updateProgress(progressData) {
             const progressBar = document.getElementById('progress-bar');
-            progressBar.style.width = percentage + '%';
+            const progressContainer = document.getElementById('progress-container');
+            const downloadedSize = document.getElementById('downloaded-size');
+            const totalSize = document.getElementById('total-size');
+            const downloadSpeed = document.getElementById('download-speed');
+            const remainingTime = document.getElementById('remaining-time');
+            const percentage = document.getElementById('percentage');
+
+            progressContainer.style.display = 'block';
+            progressBar.style.width = progressData.percentage + '%';
+            
+            // 更新详细信息
+            downloadedSize.textContent = progressData.downloaded;
+            totalSize.textContent = progressData.total;
+            downloadSpeed.textContent = progressData.speed;
+            remainingTime.textContent = progressData.eta;
+            percentage.textContent = progressData.percentage.toFixed(1) + '%';
         }
 
         function startDownload() {
@@ -117,7 +155,7 @@
                             .then(response => response.json())
                             .then(statusData => {
                                 if (statusData.status === 'Downloading') {
-                                    updateProgress(statusData.progress);
+                                    updateProgress(statusData);
                                 } else {
                                     clearInterval(interval);
                                     progressContainer.style.display = 'none';
@@ -176,7 +214,7 @@
                             .then(response => response.json())
                             .then(statusData => {
                                 if (statusData.status === 'Downloading') {
-                                    updateProgress(statusData.progress);
+                                    updateProgress(statusData);
                                 } else {
                                     clearInterval(interval);
                                     progressContainer.style.display = 'none';
@@ -273,10 +311,39 @@
         <button onclick="startDownload()">开始下载</button>
         <button onclick="startVideoDownload()">下载视频</button>
         <button onclick="cancelDownload()">取消下载</button>
+        <p>提示：下载视频时，请确保视频链接是可用的，否则可能会导致下载失败，无法出现进度属于正常现象，无报错信息出现即正常下载</p>
+        
+        
         <div id="progress-container">
-            <div id="progress-bar"></div>
+            <div id="progress-bar-container">
+                <div id="progress-bar"></div>
+            </div>
+            <div class="progress-details">
+                <div class="progress-item">
+                    <span class="progress-label">进度:</span>
+                    <span id="percentage">0%</span>
+                </div>
+                <div class="progress-item">
+                    <span class="progress-label">已下载:</span>
+                    <span id="downloaded-size">0B</span>
+                </div>
+                <div class="progress-item">
+                    <span class="progress-label">总大小:</span>
+                    <span id="total-size">0B</span>
+                </div>
+                <div class="progress-item">
+                    <span class="progress-label">速度:</span>
+                    <span id="download-speed">0B/s</span>
+                </div>
+                <div class="progress-item">
+                    <span class="progress-label">剩余时间:</span>
+                    <span id="remaining-time">未知</span>
+                </div>
+            </div>
         </div>
+        
         <p id="status">下载状态：等待中</p>
+        
         <a href="https://github.com/xhdndmm/miaobox">源码仓库</a>
         <textarea id="batch-urls" placeholder="请输入要批量下载的链接，每行一个"></textarea>
         <button onclick="startBatchDownload()">开始批量下载</button>
