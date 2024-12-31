@@ -1,33 +1,44 @@
 #https://github.com/xhdndmm/miaobox
 
-
-
 import os
 import threading
 import logging
-from flask import Flask, request, jsonify, render_template, Response
-import requests
-from tqdm import tqdm
-import re
 import webbrowser
 from urllib.parse import urlparse
-import youtube_dl #youtube_dl库可能不支持部分功能，目前测试无法下载B站的视频
+import yt_dlp
+from flask import Flask, request, jsonify, render_template
+import requests
+import re
+import magic
+from pathvalidate import sanitize_filename
+import hashlib
+from datetime import datetime
 
 app = Flask(__name__)
-download_thread = None  # 下载线程
-downloader = None  # 下载器实例
-lock = threading.Lock()  # 线程锁
+download_thread = None
+downloader = None
+lock = threading.Lock()
 
-# 配置类
 class Config:
     LOG_FILE = "miaobox_log.log"
-    SAVE_PATH = os.path.join(os.path.expanduser("~"), "Downloads")  # 默认下载路径
+    SAVE_PATH = os.path.join(os.path.expanduser("~"), "Downloads")
     MAX_RETRIES = 3
-    USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0" #自定义UA信息伪装正常用户
+    USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
+    MAX_FILE_SIZE = 1024 * 1024 * 1024 * 5  # 5GB
+    ALLOWED_MIME_TYPES = {
+        'application/pdf', 'application/zip', 'application/x-rar-compressed',
+        'application/x-7z-compressed', 'application/x-tar', 'application/gzip',
+        'application/x-bzip2', 'application/msword', 'application/vnd.ms-excel',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
+        'audio/mpeg', 'audio/wav', 'audio/ogg',
+        'video/mp4', 'video/webm', 'video/x-msvideo'
+    }
+    DOWNLOAD_TIMEOUT = 30  # 下载超时时间（秒）
 
 app.config.from_object(Config)
 
-# 设置日志记录，指定 UTF-8 编码
 logging.basicConfig(
     filename=app.config['LOG_FILE'],
     level=logging.INFO,
@@ -38,15 +49,42 @@ logging.basicConfig(
 class Downloader:
     def __init__(self, url, save_path=None, max_retries=3, user_agent=None):
         self.url = url
-        self.save_path = os.path.abspath(save_path or app.config["SAVE_PATH"])  # 转为绝对路径
+        self.save_path = os.path.abspath(save_path or app.config["SAVE_PATH"])
         if not os.path.exists(self.save_path):
-            os.makedirs(self.save_path, exist_ok=True)  # 创建目录
+            os.makedirs(self.save_path, exist_ok=True)
         self.max_retries = max_retries
         self.cancelled = False
         self.user_agent = user_agent or app.config["USER_AGENT"]
+        self.mime = magic.Magic(mime=True)
 
-    @staticmethod
-    def extract_filename(response, default_name="downloaded_file"):
+    def is_safe_path(self, path):
+        """验证保存路径的安全性"""
+        try:
+            base_path = os.path.abspath(app.config["SAVE_PATH"])
+            abs_path = os.path.abspath(path)
+            return os.path.commonpath([base_path]) == os.path.commonpath([base_path, abs_path])
+        except ValueError:
+            return False
+
+    def is_allowed_file_type(self, file_content):
+        """检查文件类型是否允许下载"""
+        try:
+            mime_type = self.mime.from_buffer(file_content[:2048])
+            return mime_type in app.config['ALLOWED_MIME_TYPES']
+        except Exception as e:
+            logging.error(f"文件类型检查失败: {e}")
+            return False
+
+    def generate_safe_filename(self, original_name, content):
+        """生成安全的文件名，包含内容哈希"""
+        name, ext = os.path.splitext(original_name)
+        content_hash = hashlib.md5(content[:8192]).hexdigest()[:8]
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_name = sanitize_filename(f"{name}_{timestamp}_{content_hash}{ext}")
+        return safe_name
+
+    def extract_filename(self, response, default_name="downloaded_file"):
+        """从响应头中提取文件名"""
         cd = response.headers.get("Content-Disposition")
         if cd:
             filename_match = re.findall(r"filename\*=(?:UTF-8'')?(.+)", cd)
@@ -59,41 +97,64 @@ class Downloader:
                     return requests.utils.unquote(filename_match[0])
         return default_name
 
-    @staticmethod
-    def sanitize_filename(filename):
+    def sanitize_filename(self, filename):
         """生成合法的文件名"""
         return re.sub(r'[<>:"/\\|?*]', '_', filename or "unknown_file")
 
-    @staticmethod
-    def clean_filename(url, response=None):
+    def clean_filename(self, url, response=None):
         """生成合法的文件名"""
-        filename = Downloader.extract_filename(response) if response else os.path.basename(url.split('?')[0])
-        return Downloader.sanitize_filename(filename)
+        filename = self.extract_filename(response) if response else os.path.basename(url.split('?')[0])
+        return self.sanitize_filename(filename)
 
     def download(self):
         """下载文件，支持取消和进度显示"""
-        headers = {
-            "User-Agent": self.user_agent
-        }
-        with requests.get(self.url, stream=True, headers=headers) as response:
-            response.raise_for_status()
-            filename = self.clean_filename(self.url, response)
-            file_path = os.path.join(self.save_path, filename)  # 确保保存到正确的目录
-            total_size = int(response.headers.get('content-length', 0))
-            downloaded_size = 0
-            progress = tqdm(total=total_size, unit='B', unit_scale=True, disable=None)
-            with open(file_path, 'wb') as file:
-                for data in response.iter_content(chunk_size=4096):
-                    if self.cancelled:
-                        progress.close()
-                        logging.info("下载取消：%s", file_path)
-                        return
-                    file.write(data)
-                    downloaded_size += len(data)
-                    progress.update(len(data))
-                    self.update_progress(downloaded_size, total_size)
-            progress.close()
-            logging.info("下载完成：%s", file_path)
+        headers = {"User-Agent": self.user_agent}
+        try:
+            with requests.get(self.url, stream=True, headers=headers, timeout=app.config['DOWNLOAD_TIMEOUT']) as response:
+                response.raise_for_status()
+                
+                # 检查文件大小
+                content_length = int(response.headers.get('content-length', 0))
+                if content_length > app.config['MAX_FILE_SIZE']:
+                    raise ValueError(f"文件大小超过限制: {content_length} > {app.config['MAX_FILE_SIZE']}")
+
+                # 下载前1KB用于文件类型检查
+                initial_content = next(response.iter_content(chunk_size=2048))
+                if not self.is_allowed_file_type(initial_content):
+                    raise ValueError("不支持的文件类型")
+
+                # 生成安全的文件名
+                original_filename = self.extract_filename(response)
+                safe_filename = self.generate_safe_filename(original_filename, initial_content)
+                file_path = os.path.join(self.save_path, safe_filename)
+
+                if not self.is_safe_path(file_path):
+                    raise ValueError("不安全的文件路径")
+
+                downloaded_size = len(initial_content)
+                with open(file_path, 'wb') as file:
+                    file.write(initial_content)
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if self.cancelled:
+                            logging.info(f"下载取消：{file_path}")
+                            return
+                        if chunk:
+                            file.write(chunk)
+                            downloaded_size += len(chunk)
+                            self.update_progress(downloaded_size, content_length)
+
+                logging.info(f"下载完成：{file_path}")
+                return safe_filename
+
+        except requests.Timeout:
+            logging.error("下载超时")
+            raise TimeoutError("下载超时，请稍后重试")
+        except requests.RequestException as e:
+            logging.error(f"网络错误：{e}")
+            raise
+        except Exception as e:
+            logging.error(f"下载错误：{e}")
+            raise
 
     def update_progress(self, downloaded_size, total_size):
         """更新下载进度"""
@@ -140,35 +201,97 @@ class VideoDownloader:
             os.makedirs(self.save_path, exist_ok=True)
         self.cancelled = False
         self.user_agent = user_agent or app.config["USER_AGENT"]
+        self.current_filename = None
+        self.cookies_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+
+    def is_bilibili_url(self, url):
+        """检查是否为B站URL"""
+        return 'bilibili.com' in url or 'b23.tv' in url
 
     def download(self):
         ydl_opts = {
-            'outtmpl': os.path.join(self.save_path, '%(title)s.%(ext)s'),
+            'outtmpl': os.path.join(self.save_path, '%(title)s_%(id)s.%(ext)s'),
             'progress_hooks': [self.progress_hook],
             'http_headers': {'User-Agent': self.user_agent},
+            'format': 'best',  # 下载最佳质量
+            'writethumbnail': True,  # 下载缩略图
+            'writesubtitles': True,  # 下载字幕（如果有）
+            'writeautomaticsub': True,  # 下载自动生成的字幕（如果有）
+            'subtitleslangs': ['zh-CN', 'en'],  # 优先下载中文和英文字幕
+            'ignoreerrors': True,  # 忽略错误继续下载
+            'no_warnings': True,  # 不显示警告
+            'quiet': True,  # 不显示标准输出
+            'extract_flat': False,  # 不提取平面列表
+            'retries': app.config['MAX_RETRIES'],  # 重试次数
         }
-        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
-            try:
-                ydl.download([self.url]) #下载B站视频可能会出现问题（在这里出现错误 报错403）
-            except Exception as e:
-                logging.error("视频下载失败：%s", e)
-                raise
+
+        # B站视频的特殊处理
+        if self.is_bilibili_url(self.url):
+            ydl_opts.update({
+                'format': 'bestvideo+bestaudio/best',  # B站视频需要合并音视频
+                'merge_output_format': 'mp4',  # 输出MP4格式
+                'cookiesfrombrowser': ('chrome',),  # 尝试从Chrome获取cookies
+                'cookiefile': self.cookies_file if os.path.exists(self.cookies_file) else None,  # 使用cookies文件
+                'extractor_args': {
+                    'bilibili': {
+                        'window_size': '1920x1080',  # 设置窗口大小以获取高质量视频
+                    },
+                },
+            })
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(self.url, download=False)
+                if info.get('_type') == 'playlist':
+                    logging.info(f"检测到播放列表，共{len(info['entries'])}个视频")
+                    for entry in info['entries']:
+                        if self.cancelled:
+                            logging.info("下载取消")
+                            return
+                        try:
+                            ydl.download([entry['webpage_url']])
+                        except Exception as e:
+                            logging.error(f"下载视频失败：{e}")
+                else:
+                    ydl.download([self.url])
+        except Exception as e:
+            if self.is_bilibili_url(self.url):
+                logging.error(f"B站视频下载失败，可能需要登录或更新cookies：{e}")
+                if not os.path.exists(self.cookies_file):
+                    logging.info("提示：请将B站cookies保存到cookies.txt文件中")
+            else:
+                logging.error(f"视频下载失败：{e}")
+            raise
 
     def progress_hook(self, d):
         if d['status'] == 'downloading':
-            total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
-            downloaded_bytes = d.get('downloaded_bytes')
-            if total_bytes and downloaded_bytes:
+            self.current_filename = d.get('filename')
+            total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate', 0)
+            downloaded_bytes = d.get('downloaded_bytes', 0)
+            
+            if total_bytes > 0:
                 progress_percentage = (downloaded_bytes / total_bytes) * 100
                 with app.app_context():
                     app.config['PROGRESS'] = progress_percentage
+                    
+            # 记录下载速度和剩余时间
+            speed = d.get('speed', 0)
+            eta = d.get('eta', 0)
+            if speed and eta:
+                logging.info(f"下载速度: {speed/1024/1024:.2f}MB/s, 预计剩余时间: {eta}秒")
+
+        elif d['status'] == 'finished':
+            logging.info(f"视频下载完成：{self.current_filename}")
 
     def start_download(self):
         try:
             self.download()
         except Exception as e:
-            logging.error("视频下载失败：%s", e)
+            logging.error(f"视频下载失败：{e}")
             raise
+
+    def cancel_download(self):
+        self.cancelled = True
 
 def is_valid_url(url):
     """验证 URL 合法性"""
