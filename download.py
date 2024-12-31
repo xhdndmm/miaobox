@@ -32,6 +32,7 @@ from tqdm import tqdm
 import re
 import webbrowser
 from urllib.parse import urlparse
+import youtube_dl #youtube_dl库可能不支持部分功能，目前测试无法下载B站的视频
 
 app = Flask(__name__)
 download_thread = None  # 下载线程
@@ -139,6 +140,44 @@ class Downloader:
         """取消当前下载任务"""
         self.cancelled = True
 
+class VideoDownloader:
+    def __init__(self, url, save_path=None, user_agent=None):
+        self.url = url
+        self.save_path = os.path.abspath(save_path or app.config["SAVE_PATH"])
+        if not os.path.exists(self.save_path):
+            os.makedirs(self.save_path, exist_ok=True)
+        self.cancelled = False
+        self.user_agent = user_agent or app.config["USER_AGENT"]
+
+    def download(self):
+        ydl_opts = {
+            'outtmpl': os.path.join(self.save_path, '%(title)s.%(ext)s'),
+            'progress_hooks': [self.progress_hook],
+            'http_headers': {'User-Agent': self.user_agent},
+        }
+        with youtube_dl.YoutubeDL(ydl_opts) as ydl:
+            try:
+                ydl.download([self.url]) #下载B站视频可能会出现问题（在这里出现错误 报错403）
+            except Exception as e:
+                logging.error("视频下载失败：%s", e)
+                raise
+
+    def progress_hook(self, d):
+        if d['status'] == 'downloading':
+            total_bytes = d.get('total_bytes') or d.get('total_bytes_estimate')
+            downloaded_bytes = d.get('downloaded_bytes')
+            if total_bytes and downloaded_bytes:
+                progress_percentage = (downloaded_bytes / total_bytes) * 100
+                with app.app_context():
+                    app.config['PROGRESS'] = progress_percentage
+
+    def start_download(self):
+        try:
+            self.download()
+        except Exception as e:
+            logging.error("视频下载失败：%s", e)
+            raise
+
 def is_valid_url(url):
     """验证 URL 合法性"""
     parsed = urlparse(url)
@@ -175,6 +214,28 @@ def start_download():
             return jsonify({'status': 'Download started', 'file': downloader.clean_filename(url)})
         except Exception as e:
             logging.error("启动下载失败：%s", e)
+            return jsonify({'status': 'Error', 'message': str(e)}), 500
+
+@app.route('/start_video_download', methods=['POST'])
+def start_video_download():
+    global download_thread, downloader
+    with lock:
+        if download_thread and download_thread.is_alive():
+            return jsonify({'status': 'Error', 'message': 'A download is already in progress'}), 409
+        try:
+            video_url = request.json.get('videoUrl')
+            save_path = app.config["SAVE_PATH"]
+            user_agent = app.config["USER_AGENT"]
+
+            if not is_valid_url(video_url):
+                return jsonify({'status': 'Error', 'message': 'Invalid URL'}), 400
+
+            downloader = VideoDownloader(video_url, save_path, user_agent)
+            download_thread = threading.Thread(target=downloader.start_download, daemon=True)
+            download_thread.start()
+            return jsonify({'status': 'Download started', 'file': os.path.basename(save_path)})
+        except Exception as e:
+            logging.error("启动视频下载失败：%s", e)
             return jsonify({'status': 'Error', 'message': str(e)}), 500
 
 @app.route('/cancel_download', methods=['POST'])

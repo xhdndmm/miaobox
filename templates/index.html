@@ -130,15 +130,61 @@
                     status.classList.add('error');
                 });
         }
+
+        function startVideoDownload() {
+            const videoUrl = document.getElementById('video-url').value;
+            const status = document.getElementById('status');
+            status.innerText = "下载状态：正在启动视频下载...";
+            status.classList.remove('error');
+            const progressContainer = document.getElementById('progress-container');
+            progressContainer.style.display = 'block';
+
+            fetch('/start_video_download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ videoUrl })
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.json().then(err => {
+                        throw new Error(err.message || "未知错误");
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                status.innerText = `下载状态：${data.status}，文件名：${data.file}`;
+                if (data.status === 'Download started') {
+                    const interval = setInterval(() => {
+                        fetch('/download_status')
+                            .then(response => response.json())
+                            .then(statusData => {
+                                if (statusData.status === 'Downloading') {
+                                    updateProgress(statusData.progress);
+                                } else {
+                                    clearInterval(interval);
+                                    progressContainer.style.display = 'none';
+                                }
+                            });
+                    }, 1000);
+                }
+            })
+            .catch(err => {
+                status.innerText = `下载状态：错误 - ${err.message}`;
+                status.classList.add('error');
+            });
+        }
     </script>
 </head>
 <body>
     <div class="container">
         <h2>miaobox - 文件下载器</h2>
         <input type="text" id="url" placeholder="请输入下载链接">
+        <input type="text" id="video-url" placeholder="请输入视频链接">
         <input type="text" id="path" placeholder="请输入保存路径（选填）">
         <br>
         <button onclick="startDownload()">开始下载</button>
+        <button onclick="startVideoDownload()">下载视频</button>
         <button onclick="cancelDownload()">取消下载</button>
         <div id="progress-container">
             <div id="progress-bar"></div>
