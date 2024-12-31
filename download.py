@@ -26,7 +26,8 @@ class Config:
     SAVE_PATH = os.path.join(os.path.expanduser("~"), "Downloads")
     MAX_RETRIES = 3
     USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
-    MAX_FILE_SIZE = 1024 * 1024 * 1024 * 5  # 5GB
+    #MAX_FILE_SIZE = 1024 * 1024 * 1024 * 5  # 5GB
+    '''
     ALLOWED_MIME_TYPES = {
         'application/pdf', 'application/zip', 'application/x-rar-compressed',
         'application/x-7z-compressed', 'application/x-tar', 'application/gzip',
@@ -37,6 +38,7 @@ class Config:
         'audio/mpeg', 'audio/wav', 'audio/ogg',
         'video/mp4', 'video/webm', 'video/x-msvideo'
     }
+    '''
     DOWNLOAD_TIMEOUT = 30  # 下载超时时间（秒）
     PROGRESS_UPDATE_INTERVAL = 0.1  # 进度更新间隔（秒）
     HISTORY_FILE = "download_history.json"  # 下载历史记录文件
@@ -120,15 +122,19 @@ class Downloader:
             with requests.get(self.url, stream=True, headers=headers, timeout=app.config['DOWNLOAD_TIMEOUT']) as response:
                 response.raise_for_status()
                 
+                #不是哥们 你搞下载大小现在干嘛 这玩意下个系统镜像都下不了
                 # 检查文件大小
+                #content_length = int(response.headers.get('content-length', 0))
+                #if content_length > app.config['MAX_FILE_SIZE']:
+                    #raise ValueError(f"文件大小超过限制: {content_length} > {app.config['MAX_FILE_SIZE']}")
+
+                # 获取文件大小
                 content_length = int(response.headers.get('content-length', 0))
-                if content_length > app.config['MAX_FILE_SIZE']:
-                    raise ValueError(f"文件大小超过限制: {content_length} > {app.config['MAX_FILE_SIZE']}")
 
                 # 下载前1KB用于文件类型检查
                 initial_content = next(response.iter_content(chunk_size=2048))
-                if not self.is_allowed_file_type(initial_content):
-                    raise ValueError("不支持的文件类型")
+                # if not self.is_allowed_file_type(initial_content):
+                #     raise ValueError("不支持的文件类型")
 
                 # 生成安全的文件名
                 original_filename = self.extract_filename(response)
@@ -530,7 +536,7 @@ def download_status():
 
 def open_browser():
     """自动打开浏览器"""
-    webbrowser.open("http://localhost:5000/")
+    webbrowser.open("http://localhost/")
 
 @app.route('/start_batch_download', methods=['POST'])
 def start_batch_download():
@@ -685,4 +691,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"无法创建默认保存路径: {e}")
     threading.Thread(target=open_browser, daemon=True).start()
-    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)  # 启动 Flask 服务 并且可以局域网访问
+    app.run(host='0.0.0.0', port=80, debug=True, threaded=True)  # 启动 Flask 服务 并且可以局域网访问 不要改端口！

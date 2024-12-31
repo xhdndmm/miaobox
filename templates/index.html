@@ -447,7 +447,7 @@
         <button onclick="startDownload()">开始下载</button>
         <button onclick="startVideoDownload()">下载视频</button>
         <button onclick="cancelDownload()">取消下载</button>
-        <p>提示：下载视频时，请确保视频链接是可用的，否则可能会导致下载失败，无法出现进度属于正常现象，无报错信息出现即正常下载</p>
+        <p>提示：下载视频时，请确保视频链接是可用的，否则可能会导致下载失败，无法出现进度属于正常现象，无报错信息出现即正常下载；如有报错，请查看日志文件。</p>
         
         
         <div id="progress-container">
@@ -480,7 +480,6 @@
         
         <p id="status">下载状态：等待中</p>
         
-        <a href="https://github.com/xhdndmm/miaobox">源码仓库</a>
         <textarea id="batch-urls" placeholder="请输入要批量下载的链接，每行一个"></textarea>
         <button onclick="startBatchDownload()">开始批量下载</button>
         <div id="batch-results" class="batch-results"></div>
@@ -488,6 +487,7 @@
         <div id="history-container" class="history-container">
             <!-- 下载历史将在这里显示 -->
         </div>
+        <a href="https://github.com/xhdndmm/miaobox">源码仓库</a>
     </div>
 </body>
 </html>

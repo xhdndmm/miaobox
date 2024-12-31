@@ -5,3 +5,4 @@ pathvalidate
 yt-dlp>=2023.12.30
 python-magic>=0.4.27
 pathvalidate>=3.0.0
+python-magic-bin
