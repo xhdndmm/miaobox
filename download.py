@@ -140,6 +140,19 @@ class Downloader:
         """取消当前下载任务"""
         self.cancelled = True
 
+    @classmethod
+    def batch_download(cls, urls, save_path=None, max_retries=3, user_agent=None):
+        """批量下载多个文件"""
+        results = []
+        for url in urls:
+            try:
+                downloader = cls(url, save_path, max_retries, user_agent)
+                downloader.start_download()
+                results.append({"url": url, "status": "success"})
+            except Exception as e:
+                results.append({"url": url, "status": "failed", "error": str(e)})
+        return results
+
 class VideoDownloader:
     def __init__(self, url, save_path=None, user_agent=None):
         self.url = url
@@ -263,7 +276,61 @@ def download_status():
 
 def open_browser():
     """自动打开浏览器"""
-    webbrowser.open("http://localhost/")
+    webbrowser.open("http://localhost:5000/")
+
+@app.route('/start_batch_download', methods=['POST'])
+def start_batch_download():
+    """处理批量下载请求"""
+    try:
+        urls = request.json.get('urls', [])
+        user_path = request.json.get('path')
+        save_path = os.path.abspath(user_path) if user_path else app.config["SAVE_PATH"]
+        
+        if not urls:
+            return jsonify({'status': 'Error', 'message': '未提供下载链接'}), 400
+
+        # 验证所有URL
+        invalid_urls = [url for url in urls if not is_valid_url(url)]
+        if invalid_urls:
+            return jsonify({
+                'status': 'Error',
+                'message': '存在无效的URL',
+                'invalid_urls': invalid_urls
+            }), 400
+
+        # 确保保存路径存在
+        if not os.path.exists(save_path):
+            os.makedirs(save_path, exist_ok=True)
+
+        # 创建批量下载线程
+        def batch_download_task():
+            results = Downloader.batch_download(urls, save_path)
+            with app.app_context():
+                app.config['BATCH_RESULTS'] = results
+
+        global download_thread
+        download_thread = threading.Thread(target=batch_download_task, daemon=True)
+        download_thread.start()
+
+        return jsonify({
+            'status': 'Batch download started',
+            'total_files': len(urls)
+        })
+
+    except Exception as e:
+        logging.error("批量下载启动失败：%s", e)
+        return jsonify({'status': 'Error', 'message': str(e)}), 500
+
+@app.route('/batch_download_status', methods=['GET'])
+def batch_download_status():
+    """获取批量下载状态"""
+    results = app.config.get('BATCH_RESULTS', [])
+    is_running = download_thread and download_thread.is_alive() if download_thread else False
+    
+    return jsonify({
+        'status': 'running' if is_running else 'completed',
+        'results': results
+    })
 
 if __name__ == "__main__":
     # 确保默认保存路径存在
@@ -275,4 +342,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"无法创建默认保存路径: {e}")
     threading.Thread(target=open_browser, daemon=True).start()
-    app.run(host='0.0.0.0', port=80, debug=True, threaded=True)  # 启动 Flask 服务 并且可以局域网访问
+    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)  # 启动 Flask 服务 并且可以局域网访问

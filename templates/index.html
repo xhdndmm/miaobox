@@ -64,6 +64,22 @@
             text-decoration: none;
             transition: color 0.3s ease;
         }
+        #batch-urls {
+            width: 80%;
+            height: 100px;
+            margin: 10px 0;
+            padding: 10px;
+            resize: vertical;
+        }
+        
+        .batch-results {
+            margin-top: 10px;
+            text-align: left;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 4px;
+            display: none;
+        }
     </style>
     <script>
         function updateProgress(percentage) {
@@ -174,6 +190,77 @@
                 status.classList.add('error');
             });
         }
+
+        function startBatchDownload() {
+            const urlsText = document.getElementById('batch-urls').value;
+            const path = document.getElementById('path').value || "";
+            const status = document.getElementById('status');
+            const batchResults = document.getElementById('batch-results');
+            
+            // 分割URL（支持换行符分隔的URL列表）
+            const urls = urlsText.split('\n')
+                .map(url => url.trim())
+                .filter(url => url.length > 0);
+                
+            if (urls.length === 0) {
+                status.innerText = "请输入至少一个下载链接";
+                status.classList.add('error');
+                return;
+            }
+
+            status.innerText = "批量下载状态：正在启动...";
+            status.classList.remove('error');
+            batchResults.style.display = 'none';
+
+            fetch('/start_batch_download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ urls, path })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'Batch download started') {
+                    status.innerText = `批量下载已开始，共 ${data.total_files} 个文件`;
+                    checkBatchStatus();
+                } else {
+                    throw new Error(data.message);
+                }
+            })
+            .catch(err => {
+                status.innerText = `错误：${err.message}`;
+                status.classList.add('error');
+            });
+        }
+
+        function checkBatchStatus() {
+            const interval = setInterval(() => {
+                fetch('/batch_download_status')
+                    .then(response => response.json())
+                    .then(data => {
+                        const batchResults = document.getElementById('batch-results');
+                        const status = document.getElementById('status');
+                        
+                        if (data.status === 'completed') {
+                            clearInterval(interval);
+                            status.innerText = "批量下载已完成";
+                            
+                            // 显示详细结果
+                            let resultsHtml = '<h3>下载结果：</h3><ul>';
+                            data.results.forEach(result => {
+                                resultsHtml += `<li>${result.url}: ${result.status}`;
+                                if (result.error) {
+                                    resultsHtml += ` - ${result.error}`;
+                                }
+                                resultsHtml += '</li>';
+                            });
+                            resultsHtml += '</ul>';
+                            
+                            batchResults.innerHTML = resultsHtml;
+                            batchResults.style.display = 'block';
+                        }
+                    });
+            }, 1000);
+        }
     </script>
 </head>
 <body>
@@ -191,6 +278,9 @@
         </div>
         <p id="status">下载状态：等待中</p>
         <a href="https://github.com/xhdndmm/miaobox">源码仓库</a>
+        <textarea id="batch-urls" placeholder="请输入要批量下载的链接，每行一个"></textarea>
+        <button onclick="startBatchDownload()">开始批量下载</button>
+        <div id="batch-results" class="batch-results"></div>
     </div>
 </body>
 </html>
