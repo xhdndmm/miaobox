@@ -103,6 +103,59 @@
             border-radius: 4px;
             display: none;
         }
+        
+        /* 下载历史样式 */
+        .history-container {
+            margin-top: 20px;
+            text-align: left;
+            padding: 10px;
+            background: #f5f5f5;
+            border-radius: 8px;
+        }
+        
+        .history-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            margin: 5px 0;
+            background: white;
+            border-radius: 4px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .history-info {
+            flex-grow: 1;
+            margin-right: 10px;
+        }
+        
+        .history-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .history-actions button {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        
+        .file-size {
+            color: #666;
+            font-size: 12px;
+        }
+        
+        .download-time {
+            color: #888;
+            font-size: 12px;
+        }
+        
+        .delete-btn {
+            background: #dc3545;
+        }
+        
+        .delete-btn:hover {
+            background: #c82333;
+        }
     </style>
     <script>
         function updateProgress(progressData) {
@@ -299,6 +352,89 @@
                     });
             }, 1000);
         }
+
+        function loadDownloadHistory() {
+            fetch('/download_history')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        displayHistory(data.history);
+                    }
+                })
+                .catch(err => {
+                    console.error('加载历史记录失败:', err);
+                });
+        }
+        
+        function displayHistory(history) {
+            const container = document.getElementById('history-container');
+            if (!history || history.length === 0) {
+                container.innerHTML = '<p>暂无下载记录</p>';
+                return;
+            }
+            
+            let html = '<h3>下载历史</h3>';
+            history.forEach(item => {
+                html += `
+                    <div class="history-item">
+                        <div class="history-info">
+                            <div>${item.file_name}</div>
+                            <div class="file-size">大小: ${formatSize(item.file_size)}</div>
+                            <div class="download-time">下载时间: ${item.download_time}</div>
+                        </div>
+                        <div class="history-actions">
+                            <button onclick="openFile('${item.file_path}')">打开文件夹</button>
+                            <button class="delete-btn" onclick="deleteDownload('${item.file_path}', true)">删除</button>
+                        </div>
+                    </div>
+                `;
+            });
+            
+            container.innerHTML = html;
+        }
+        
+        function formatSize(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        function openFile(filePath) {
+            // 打开文件所在文件夹
+            const dirPath = filePath.substring(0, filePath.lastIndexOf('/'));
+            window.open('file:///' + dirPath);
+        }
+        
+        function deleteDownload(filePath, deleteFile = false) {
+            if (!confirm('确定要删除这条记录吗？' + (deleteFile ? '（文件也会被删除）' : ''))) {
+                return;
+            }
+            
+            fetch('/delete_download', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_path: filePath, delete_file: deleteFile })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    loadDownloadHistory();  // 重新加载历史记录
+                } else {
+                    alert('删除失败：' + data.message);
+                }
+            })
+            .catch(err => {
+                console.error('删除失败:', err);
+                alert('删除失败，请重试');
+            });
+        }
+        
+        // 页面加载完成后加载历史记录
+        document.addEventListener('DOMContentLoaded', function() {
+            loadDownloadHistory();
+        });
     </script>
 </head>
 <body>
@@ -348,6 +484,10 @@
         <textarea id="batch-urls" placeholder="请输入要批量下载的链接，每行一个"></textarea>
         <button onclick="startBatchDownload()">开始批量下载</button>
         <div id="batch-results" class="batch-results"></div>
+        
+        <div id="history-container" class="history-container">
+            <!-- 下载历史将在这里显示 -->
+        </div>
     </div>
 </body>
 </html>

@@ -14,6 +14,7 @@ from pathvalidate import sanitize_filename
 import hashlib
 from datetime import datetime
 import time
+import json
 
 app = Flask(__name__)
 download_thread = None
@@ -38,6 +39,7 @@ class Config:
     }
     DOWNLOAD_TIMEOUT = 30  # 下载超时时间（秒）
     PROGRESS_UPDATE_INTERVAL = 0.1  # 进度更新间隔（秒）
+    HISTORY_FILE = "download_history.json"  # 下载历史记录文件
 
 app.config.from_object(Config)
 
@@ -142,6 +144,7 @@ class Downloader:
                     for chunk in response.iter_content(chunk_size=8192):
                         if self.cancelled:
                             logging.info(f"下载取消：{file_path}")
+                            download_history.add_record(self.url, file_path, status="cancelled")
                             return
                         if chunk:
                             file.write(chunk)
@@ -149,6 +152,8 @@ class Downloader:
                             self.update_progress(downloaded_size, content_length)
 
                 logging.info(f"下载完成：{file_path}")
+                # 添加下载记录
+                download_history.add_record(self.url, file_path)
                 return safe_filename
 
         except requests.Timeout:
@@ -345,28 +350,27 @@ class VideoDownloader:
             'outtmpl': os.path.join(self.save_path, '%(title)s_%(id)s.%(ext)s'),
             'progress_hooks': [self.progress_hook],
             'http_headers': {'User-Agent': self.user_agent},
-            'format': 'best',  # 下载最佳质量
-            'writethumbnail': True,  # 下载缩略图
-            'writesubtitles': True,  # 下载字幕（如果有）
-            'writeautomaticsub': True,  # 下载自动生成的字幕（如果有）
-            'subtitleslangs': ['zh-CN', 'en'],  # 优先下载中文和英文字幕
-            'ignoreerrors': True,  # 忽略错误继续下载
-            'no_warnings': True,  # 不显示警告
-            'quiet': True,  # 不显示标准输出
-            'extract_flat': False,  # 不提取平面列表
-            'retries': app.config['MAX_RETRIES'],  # 重试次数
+            'format': 'best',
+            'writethumbnail': True,
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': ['zh-CN', 'en'],
+            'ignoreerrors': True,
+            'no_warnings': True,
+            'quiet': True,
+            'extract_flat': False,
+            'retries': app.config['MAX_RETRIES'],
         }
 
-        # B站视频的特殊处理
         if self.is_bilibili_url(self.url):
             ydl_opts.update({
-                'format': 'bestvideo+bestaudio/best',  # B站视频需要合并音视频
-                'merge_output_format': 'mp4',  # 输出MP4格式
-                'cookiesfrombrowser': ('chrome',),  # 尝试从Chrome获取cookies
-                'cookiefile': self.cookies_file if os.path.exists(self.cookies_file) else None,  # 使用cookies文件
+                'format': 'bestvideo+bestaudio/best',
+                'merge_output_format': 'mp4',
+                'cookiesfrombrowser': ('chrome',),
+                'cookiefile': self.cookies_file if os.path.exists(self.cookies_file) else None,
                 'extractor_args': {
                     'bilibili': {
-                        'window_size': '1920x1080',  # 设置窗口大小以获取高质量视频
+                        'window_size': '1920x1080',
                     },
                 },
             })
@@ -382,10 +386,16 @@ class VideoDownloader:
                             return
                         try:
                             ydl.download([entry['webpage_url']])
+                            # 添加下载记录
+                            file_path = os.path.join(self.save_path, f"{entry.get('title', 'unknown')}_{entry.get('id', '')}.mp4")
+                            download_history.add_record(entry['webpage_url'], file_path, file_type="video")
                         except Exception as e:
                             logging.error(f"下载视频失败：{e}")
                 else:
                     ydl.download([self.url])
+                    # 添加下载记录
+                    if self.current_filename:
+                        download_history.add_record(self.url, self.current_filename, file_type="video")
         except Exception as e:
             if self.is_bilibili_url(self.url):
                 logging.error(f"B站视频下载失败，可能需要登录或更新cookies：{e}")
@@ -575,6 +585,95 @@ def batch_download_status():
         'status': 'running' if is_running else 'completed',
         'results': results
     })
+
+# 添加下载历史记录管理
+class DownloadHistory:
+    def __init__(self):
+        self.history_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), Config.HISTORY_FILE)
+        self.load_history()
+
+    def load_history(self):
+        """加载下载历史"""
+        try:
+            if os.path.exists(self.history_file):
+                with open(self.history_file, 'r', encoding='utf-8') as f:
+                    self.history = json.load(f)
+            else:
+                self.history = []
+        except Exception as e:
+            logging.error(f"加载历史记录失败：{e}")
+            self.history = []
+
+    def save_history(self):
+        """保存下载历史"""
+        try:
+            with open(self.history_file, 'w', encoding='utf-8') as f:
+                json.dump(self.history, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logging.error(f"保存历史记录失败：{e}")
+
+    def add_record(self, url, file_path, file_type="file", status="completed"):
+        """添加下载记录"""
+        try:
+            record = {
+                "url": url,
+                "file_path": file_path,
+                "file_name": os.path.basename(file_path),
+                "file_type": file_type,
+                "file_size": os.path.getsize(file_path) if os.path.exists(file_path) else 0,
+                "download_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "status": status
+            }
+            self.history.insert(0, record)  # 新记录插入到最前面
+            self.save_history()
+        except Exception as e:
+            logging.error(f"添加下载记录失败：{e}")
+
+    def remove_record(self, file_path, delete_file=False):
+        """删除下载记录"""
+        try:
+            self.history = [h for h in self.history if h["file_path"] != file_path]
+            self.save_history()
+            if delete_file and os.path.exists(file_path):
+                os.remove(file_path)
+                return True
+        except Exception as e:
+            logging.error(f"删除记录失败：{e}")
+            return False
+        return True
+
+    def get_history(self, limit=50):
+        """获取下载历史"""
+        return self.history[:limit]
+
+# 创建全局下载历史管理器
+download_history = DownloadHistory()
+
+@app.route('/download_history', methods=['GET'])
+def get_download_history():
+    """获取下载历史"""
+    try:
+        history = download_history.get_history()
+        return jsonify({'status': 'success', 'history': history})
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/delete_download', methods=['POST'])
+def delete_download():
+    """删除下载记录和文件"""
+    try:
+        file_path = request.json.get('file_path')
+        delete_file = request.json.get('delete_file', False)
+        
+        if not file_path:
+            return jsonify({'status': 'error', 'message': '未提供文件路径'}), 400
+
+        if download_history.remove_record(file_path, delete_file):
+            return jsonify({'status': 'success', 'message': '删除成功'})
+        else:
+            return jsonify({'status': 'error', 'message': '删除失败'}), 500
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
 
 if __name__ == "__main__":
     # 确保默认保存路径存在
