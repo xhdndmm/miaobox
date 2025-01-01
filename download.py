@@ -22,24 +22,22 @@ downloader = None
 lock = threading.Lock()
 
 class Config:
+    """应用程序配置类"""
+    # 文件和路径配置
     LOG_FILE = "miaobox_log.log"
     SAVE_PATH = os.path.join(os.path.expanduser("~"), "Downloads")
+    HISTORY_FILE = "download_history.json"
+
+    # 下载配置
     MAX_RETRIES = 3
-    USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) Gecko/20100101 Firefox/132.0"
-    MAX_FILE_SIZE = 1024 * 1024 * 1024 * 5  # 5GB
-    ALLOWED_MIME_TYPES = {
-        'application/pdf', 'application/zip', 'application/x-rar-compressed',
-        'application/x-7z-compressed', 'application/x-tar', 'application/gzip',
-        'application/x-bzip2', 'application/msword', 'application/vnd.ms-excel',
-        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-        'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-        'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml',
-        'audio/mpeg', 'audio/wav', 'audio/ogg',
-        'video/mp4', 'video/webm', 'video/x-msvideo'
-    }
     DOWNLOAD_TIMEOUT = 30  # 下载超时时间（秒）
     PROGRESS_UPDATE_INTERVAL = 0.1  # 进度更新间隔（秒）
-    HISTORY_FILE = "download_history.json"  # 下载历史记录文件
+
+    # 请求头配置
+    USER_AGENT = (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:132.0) "
+        "Gecko/20100101 Firefox/132.0"
+    )
 
 app.config.from_object(Config)
 
@@ -120,27 +118,18 @@ class Downloader:
             with requests.get(self.url, stream=True, headers=headers, timeout=app.config['DOWNLOAD_TIMEOUT']) as response:
                 response.raise_for_status()
                 
-                # 检查文件大小
-                content_length = int(response.headers.get('content-length', 0))
-                if content_length > app.config['MAX_FILE_SIZE']:
-                    raise ValueError(f"文件大小超过限制: {content_length} > {app.config['MAX_FILE_SIZE']}")
-
-                # 下载前1KB用于文件类型检查
-                initial_content = next(response.iter_content(chunk_size=2048))
-                if not self.is_allowed_file_type(initial_content):
-                    raise ValueError("不支持的文件类型")
-
                 # 生成安全的文件名
                 original_filename = self.extract_filename(response)
-                safe_filename = self.generate_safe_filename(original_filename, initial_content)
+                safe_filename = self.generate_safe_filename(original_filename, response.content[:8192])
                 file_path = os.path.join(self.save_path, safe_filename)
 
                 if not self.is_safe_path(file_path):
                     raise ValueError("不安全的文件路径")
 
-                downloaded_size = len(initial_content)
+                content_length = int(response.headers.get('content-length', 0))
+                downloaded_size = 0
+                
                 with open(file_path, 'wb') as file:
-                    file.write(initial_content)
                     for chunk in response.iter_content(chunk_size=8192):
                         if self.cancelled:
                             logging.info(f"下载取消：{file_path}")
@@ -345,35 +334,61 @@ class VideoDownloader:
         except Exception as e:
             logging.error(f"处理进度回调时出错：{e}")
 
-    def download(self):
-        ydl_opts = {
+    def get_download_options(self) -> dict:
+        """获取下载配置"""
+        # 基础配置
+        options = {
+            'format': 'bestvideo+bestaudio/best',  # 选择最佳视频和音频质量
             'outtmpl': os.path.join(self.save_path, '%(title)s_%(id)s.%(ext)s'),
             'progress_hooks': [self.progress_hook],
             'http_headers': {'User-Agent': self.user_agent},
-            'format': 'best',
-            'writethumbnail': True,
-            'writesubtitles': True,
-            'writeautomaticsub': True,
-            'subtitleslangs': ['zh-CN', 'en'],
-            'ignoreerrors': True,
-            'no_warnings': True,
-            'quiet': True,
-            'extract_flat': False,
             'retries': app.config['MAX_RETRIES'],
+            'merge_output_format': 'mp4',  # 指定输出格式为mp4
+            'postprocessors': [{
+                'key': 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4',
+            }],
         }
-
+        
+        # B站视频特殊配置
         if self.is_bilibili_url(self.url):
-            ydl_opts.update({
-                'format': 'bestvideo+bestaudio/best',
+            options.update({
+                'format': 'bestvideo*+bestaudio/best',  # 选择最佳视频和音频
+                'format_sort': [
+                    'res:2160',  # 4K
+                    'res:1440',  # 2K
+                    'res:1080',  # 1080P
+                    'res:720',   # 720P
+                ],
                 'merge_output_format': 'mp4',
-                'cookiesfrombrowser': ('chrome',),
-                'cookiefile': self.cookies_file if os.path.exists(self.cookies_file) else None,
-                'extractor_args': {
-                    'bilibili': {
-                        'window_size': '1920x1080',
-                    },
-                },
+                'postprocessors': [{
+                    'key': 'FFmpegVideoConvertor',
+                    'preferedformat': 'mp4',
+                }, {
+                    # 添加音频后处理器
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'aac',
+                    'preferredquality': '192',
+                }],
+                'extractaudio': True,  # 确保提取音频
+                'keepvideo': True,     # 保留视频
+                'postprocessor_args': [
+                    '-vcodec', 'copy',  # 复制视频编码，避免重新编码
+                    '-acodec', 'aac',   # 使用AAC音频编码
+                ],
             })
+            
+            # 添加cookies配置
+            if os.path.exists(self.cookies_file):
+                options.update({
+                    'cookiesfrombrowser': ('chrome',),
+                    'cookiefile': self.cookies_file,
+                })
+                
+        return options
+
+    def download(self):
+        ydl_opts = self.get_download_options()
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
