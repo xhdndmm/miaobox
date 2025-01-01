@@ -545,7 +545,7 @@ def download_status():
 
 def open_browser():
     """自动打开浏览器"""
-    webbrowser.open("http://localhost:5000/")
+    webbrowser.open("http://localhost/")
 
 @app.route('/start_batch_download', methods=['POST'])
 def start_batch_download():
@@ -700,4 +700,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"无法创建默认保存路径: {e}")
     threading.Thread(target=open_browser, daemon=True).start()
-    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)  # 启动 Flask 服务 并且可以局域网访问
+    app.run(host='0.0.0.0', port=80, debug=True, threaded=True)  # 启动 Flask 服务 并且可以局域网访问 不要改端口！
