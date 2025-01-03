@@ -1,0 +1,21 @@
+[MASTER]
+init-hook='import sys;'
+
+[MESSAGES CONTROL]
+disable=
+    # no-member,
+    logging-fstring-interpolation,
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    # too-many-return-statements,
+    broad-exception-caught,
+    # invalid-name,
+    # broad-exception-raised
+    # too-many-locals,
+    # too-many-branches,
+    # too-many-lines,
+
+[BASIC]
+# Maximum number of characters on a single line.
+max-line-length=120
