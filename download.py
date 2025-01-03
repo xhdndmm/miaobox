@@ -1,11 +1,27 @@
 #https://github.com/xhdndmm/miaobox
 
 import os
+import sys
 import threading
 import logging
 import webbrowser
 from urllib.parse import urlparse
-import yt_dlp
+
+# 检查并添加虚拟环境路径
+venv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.venv', 'lib', 'python3.12', 'site-packages')
+if os.path.exists(venv_path):
+    sys.path.insert(0, venv_path)
+
+try:
+    import yt_dlp
+    YTDLP_AVAILABLE = True
+    logging.info("成功加载yt-dlp模块")
+except ImportError as e:
+    YTDLP_AVAILABLE = False
+    logging.error(f"加载yt-dlp模块失败：{e}")
+    logging.error("请确保在正确的Python环境中运行程序，当前Python路径：%s", sys.executable)
+    logging.error("您可以尝试运行：pip install yt-dlp")
+
 from flask import Flask, request, jsonify, render_template
 import requests
 import re
@@ -32,6 +48,8 @@ class Config:
     MAX_RETRIES = 3
     DOWNLOAD_TIMEOUT = 30  # 下载超时时间（秒）
     PROGRESS_UPDATE_INTERVAL = 0.1  # 进度更新间隔（秒）
+    MAX_THREADS = 8  # 最大线程数
+    MIN_CHUNK_SIZE = 1024 * 1024  # 最小分块大小（1MB）
 
     # 请求头配置
     USER_AGENT = (
@@ -61,6 +79,11 @@ class Downloader:
         # 初始化进度相关变量
         self.last_update_time = time.time()
         self.last_downloaded_size = 0
+        self.downloaded_chunks = {}
+        self.chunk_ranges = {}  # 存储每个线程的下载范围
+        self.total_size = 0
+        self.chunk_locks = {}
+        self.progress_lock = threading.Lock()
 
     def is_safe_path(self, path):
         """验证保存路径的安全性"""
@@ -111,14 +134,165 @@ class Downloader:
         filename = self.extract_filename(response) if response else os.path.basename(url.split('?')[0])
         return self.sanitize_filename(filename)
 
+    def download_chunk(self, start, end, chunk_id, file_path):
+        """下载指定范围的文件块"""
+        if self.cancelled:
+            return
+
+        headers = {
+            "User-Agent": self.user_agent,
+            "Range": f"bytes={start}-{end}"
+        }
+
+        try:
+            response = requests.get(self.url, headers=headers, stream=True, timeout=app.config['DOWNLOAD_TIMEOUT'])
+            response.raise_for_status()
+
+            chunk_size = end - start + 1
+            with self.chunk_locks[chunk_id]:
+                with open(file_path, 'rb+') as f:
+                    f.seek(start)
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if self.cancelled:
+                            return
+                        if chunk:
+                            f.write(chunk)
+                            with self.progress_lock:
+                                self.downloaded_chunks[chunk_id] = self.downloaded_chunks.get(chunk_id, 0) + len(chunk)
+                                self.update_progress(sum(self.downloaded_chunks.values()), self.total_size)
+
+        except Exception as e:
+            logging.error(f"下载块 {chunk_id} 失败: {e}")
+            raise
+
+    def update_progress(self, downloaded_size, total_size):
+        """更新下载进度"""
+        try:
+            progress_percentage = (downloaded_size / total_size) * 100 if total_size > 0 else 0
+            
+            # 计算下载速度
+            current_time = time.time()
+            if hasattr(self, 'last_update_time') and hasattr(self, 'last_downloaded_size'):
+                time_diff = current_time - self.last_update_time
+                size_diff = downloaded_size - self.last_downloaded_size
+                speed = size_diff / time_diff if time_diff > 0 else 0
+                
+                # 计算剩余时间
+                remaining_size = total_size - downloaded_size
+                eta = remaining_size / speed if speed > 0 else 0
+                
+                # 计算每个线程的进度
+                thread_progress = []
+                for chunk_id in sorted(self.downloaded_chunks.keys()):
+                    chunk_downloaded = self.downloaded_chunks.get(chunk_id, 0)
+                    chunk_start, chunk_end = self.chunk_ranges.get(chunk_id, (0, 0))
+                    chunk_total = chunk_end - chunk_start + 1
+                    chunk_percentage = (chunk_downloaded / chunk_total) * 100 if chunk_total > 0 else 0
+                    thread_progress.append({
+                        'thread_id': chunk_id + 1,
+                        'percentage': chunk_percentage,
+                        'downloaded': format_size(chunk_downloaded),
+                        'total': format_size(chunk_total),
+                        'range': f"{format_size(chunk_start)}-{format_size(chunk_end)}"
+                    })
+                
+                # 更新进度信息
+                with app.app_context():
+                    app.config['PROGRESS'] = {
+                        'percentage': progress_percentage,
+                        'downloaded': format_size(downloaded_size),
+                        'total': format_size(total_size),
+                        'speed': format_size(speed) + '/s',
+                        'eta': format_time(eta),
+                        'threads': thread_progress
+                    }
+            
+            # 保存当前状态用于下次计算
+            self.last_update_time = current_time
+            self.last_downloaded_size = downloaded_size
+            
+        except Exception as e:
+            logging.error(f"更新进度时出错：{e}")
+
     def download(self):
-        """下载文件，支持取消和进度显示"""
+        """使用多线程下载文件"""
+        headers = {"User-Agent": self.user_agent}
+        try:
+            # 发送HEAD请求获取文件大小
+            response = requests.head(self.url, headers=headers, timeout=app.config['DOWNLOAD_TIMEOUT'])
+            response.raise_for_status()
+            self.total_size = int(response.headers.get('content-length', 0))
+
+            # 如果文件太小或不支持范围请求，使用单线程下载
+            if self.total_size < app.config['MIN_CHUNK_SIZE'] or 'accept-ranges' not in response.headers:
+                return self.single_thread_download()
+
+            # 确定实际使用的线程数
+            chunk_size = max(self.total_size // app.config['MAX_THREADS'], app.config['MIN_CHUNK_SIZE'])
+            num_chunks = min(app.config['MAX_THREADS'], self.total_size // chunk_size)
+
+            # 生成安全的文件名
+            response = requests.get(self.url, headers=headers, stream=True, timeout=1)
+            original_filename = self.extract_filename(response)
+            safe_filename = self.generate_safe_filename(original_filename, response.content[:8192])
+            file_path = os.path.join(self.save_path, safe_filename)
+
+            if not self.is_safe_path(file_path):
+                raise ValueError("不安全的文件路径")
+
+            # 创建空文件
+            with open(file_path, 'wb') as f:
+                f.truncate(self.total_size)
+
+            # 初始化进度追踪
+            self.downloaded_chunks = {}
+            self.chunk_locks = {i: threading.Lock() for i in range(num_chunks)}
+            self.chunk_ranges = {}
+
+            # 创建并启动下载线程
+            threads = []
+            for i in range(num_chunks):
+                start = i * chunk_size
+                end = start + chunk_size - 1 if i < num_chunks - 1 else self.total_size - 1
+                self.chunk_ranges[i] = (start, end)  # 记录每个线程的下载范围
+                thread = threading.Thread(
+                    target=self.download_chunk,
+                    args=(start, end, i, file_path)
+                )
+                threads.append(thread)
+                thread.start()
+                logging.info(f"启动线程 {i+1}/{num_chunks}，下载范围：{format_size(start)}-{format_size(end)}")
+
+            # 等待所有线程完成
+            for thread in threads:
+                thread.join()
+
+            if self.cancelled:
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                return None
+
+            logging.info(f"下载完成：{file_path}")
+            download_history.add_record(self.url, file_path)
+            return safe_filename
+
+        except requests.Timeout:
+            logging.error("下载超时")
+            raise TimeoutError("下载超时，请稍后重试")
+        except requests.RequestException as e:
+            logging.error(f"网络错误：{e}")
+            raise
+        except Exception as e:
+            logging.error(f"下载错误：{e}")
+            raise
+
+    def single_thread_download(self):
+        """单线程下载方法"""
         headers = {"User-Agent": self.user_agent}
         try:
             with requests.get(self.url, stream=True, headers=headers, timeout=app.config['DOWNLOAD_TIMEOUT']) as response:
                 response.raise_for_status()
                 
-                # 生成安全的文件名
                 original_filename = self.extract_filename(response)
                 safe_filename = self.generate_safe_filename(original_filename, response.content[:8192])
                 file_path = os.path.join(self.save_path, safe_filename)
@@ -141,52 +315,12 @@ class Downloader:
                             self.update_progress(downloaded_size, content_length)
 
                 logging.info(f"下载完成：{file_path}")
-                # 添加下载记录
                 download_history.add_record(self.url, file_path)
                 return safe_filename
 
-        except requests.Timeout:
-            logging.error("下载超时")
-            raise TimeoutError("下载超时，请稍后重试")
-        except requests.RequestException as e:
-            logging.error(f"网络错误：{e}")
-            raise
         except Exception as e:
-            logging.error(f"下载错误：{e}")
+            logging.error(f"单线程下载失败：{e}")
             raise
-
-    def update_progress(self, downloaded_size, total_size):
-        """更新下载进度"""
-        try:
-            progress_percentage = (downloaded_size / total_size) * 100 if total_size > 0 else 0
-            
-            # 计算下载速度
-            current_time = time.time()
-            if hasattr(self, 'last_update_time') and hasattr(self, 'last_downloaded_size'):
-                time_diff = current_time - self.last_update_time
-                size_diff = downloaded_size - self.last_downloaded_size
-                speed = size_diff / time_diff if time_diff > 0 else 0
-                
-                # 计算剩余时间
-                remaining_size = total_size - downloaded_size
-                eta = remaining_size / speed if speed > 0 else 0
-                
-                # 更新进度信息
-                with app.app_context():
-                    app.config['PROGRESS'] = {
-                        'percentage': progress_percentage,
-                        'downloaded': format_size(downloaded_size),
-                        'total': format_size(total_size),
-                        'speed': format_size(speed) + '/s',
-                        'eta': format_time(eta)
-                    }
-            
-            # 保存当前状态用于下次计算
-            self.last_update_time = current_time
-            self.last_downloaded_size = downloaded_size
-            
-        except Exception as e:
-            logging.error(f"更新进度时出错：{e}")
 
     def start_download(self):
         """启动下载，支持多次重试"""
@@ -460,30 +594,52 @@ def index():
     """渲染主页面"""
     return render_template('index.html')
 
+def is_video_url(url):
+    """检测是否为视频URL"""
+    if not YTDLP_AVAILABLE:
+        return False
+    video_patterns = [
+        r'youtube\.com/watch\?v=',
+        r'youtu\.be/',
+        r'bilibili\.com/video/',
+        r'b23\.tv/',
+        r'\.mp4$',
+        r'\.m3u8$',
+        r'\.flv$',
+        r'\.mkv$',
+        r'\.webm$'
+    ]
+    return any(re.search(pattern, url, re.I) for pattern in video_patterns)
+
 @app.route('/start_download', methods=['POST'])
 def start_download():
-    """启动下载任务"""
+    """统一的下载入口"""
     global download_thread, downloader
     with lock:
         if download_thread and download_thread.is_alive():
-            return jsonify({'status': 'Error', 'message': 'A download is already in progress'}), 409
+            return jsonify({'status': 'Error', 'message': '已有下载任务正在进行'}), 409
         try:
             url = request.json.get('url')
-            user_path = request.json.get('path')  # 用户传入的路径
+            user_path = request.json.get('path')
             save_path = os.path.abspath(user_path) if user_path else app.config["SAVE_PATH"]
-            retries = request.json.get('retries', app.config['MAX_RETRIES'])
 
             if not is_valid_url(url):
-                return jsonify({'status': 'Error', 'message': 'Invalid URL'}), 400
+                return jsonify({'status': 'Error', 'message': '无效的URL'}), 400
 
-            # 确保路径存在
-            if not os.path.exists(save_path):
-                os.makedirs(save_path, exist_ok=True)
+            # 根据URL类型选择下载器
+            if is_video_url(url):
+                if not YTDLP_AVAILABLE:
+                    return jsonify({
+                        'status': 'Error', 
+                        'message': '未安装yt-dlp模块，无法下载视频。请运行: pip install yt-dlp'
+                    }), 400
+                downloader = VideoDownloader(url, save_path)
+            else:
+                downloader = Downloader(url, save_path)
 
-            downloader = Downloader(url, save_path, retries)
             download_thread = threading.Thread(target=downloader.start_download, daemon=True)
             download_thread.start()
-            return jsonify({'status': 'Download started', 'file': downloader.clean_filename(url)})
+            return jsonify({'status': 'Download started', 'file': os.path.basename(save_path)})
         except Exception as e:
             logging.error("启动下载失败：%s", e)
             return jsonify({'status': 'Error', 'message': str(e)}), 500
@@ -700,4 +856,4 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"无法创建默认保存路径: {e}")
     threading.Thread(target=open_browser, daemon=True).start()
-    app.run(host='0.0.0.0', port=80, debug=True, threaded=True)  # 启动 Flask 服务 并且可以局域网访问 不要改端口！
+    app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)  # 启动 Flask 服务 并且可以局域网访问 不要改端口！
