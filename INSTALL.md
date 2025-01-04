@@ -109,12 +109,14 @@ Ubuntu/Debian：
 ```bash
 sudo apt update
 sudo apt install ffmpeg
+sudo apt-get install libmagic1
 ```
 
 CentOS/RHEL：
 ```bash
 sudo yum install epel-release
 sudo yum install ffmpeg ffmpeg-devel
+sudo yum install file-libs
 ```
 
 Fedora：
