@@ -526,54 +526,125 @@ class VideoDownloader:
         """获取下载配置"""
         # 基础配置
         options = {
-            'format': 'bestvideo+bestaudio/best',  # 选择最佳视频和音频质量
+            'format': 'bestvideo*+bestaudio/best',
             'outtmpl': os.path.join(self.save_path, '%(title)s_%(id)s.%(ext)s'),
             'progress_hooks': [self.progress_hook],
             'http_headers': {'User-Agent': self.user_agent},
             'retries': app.config['MAX_RETRIES'],
-            'merge_output_format': 'mp4',  # 指定输出格式为mp4
+            'merge_output_format': 'mp4',
+            'writethumbnail': True,
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': ['zh-CN', 'en'],
             'postprocessors': [{
                 'key': 'FFmpegVideoConvertor',
                 'preferedformat': 'mp4',
+            }, {
+                'key': 'FFmpegMetadata',
+                'add_metadata': True,
+            }, {
+                'key': 'EmbedThumbnail',
             }],
+            'format_sort': [
+                'res:2160',
+                'res:1440',
+                'res:1080',
+                'res:720',
+                'res:480',
+            ],
+            'concurrent_fragment_downloads': 8,  # 并发下载片段数
+            'throttledratelimit': 100000,  # 限制下载速度（字节/秒）
+            'socket_timeout': 30,  # 连接超时时间
+            'extractor_retries': 3,  # 提取器重试次数
+            'fragment_retries': 10,  # 片段重试次数
+            'skip_unavailable_fragments': True,  # 跳过不可用片段
+            'overwrites': True,  # 覆盖已存在的文件
         }
 
         # B站视频特殊配置
         if self.is_bilibili_url(self.url):
-            options.update({
-                'format': 'bestvideo*+bestaudio/best',  # 选择最佳视频和音频
-                'format_sort': [
-                    'res:2160',  # 4K
-                    'res:1440',  # 2K
-                    'res:1080',  # 1080P
-                    'res:720',   # 720P
-                ],
-                'merge_output_format': 'mp4',
-                'postprocessors': [{
-                    'key': 'FFmpegVideoConvertor',
-                    'preferedformat': 'mp4',
-                }, {
-                    # 添加音频后处理器
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'aac',
-                    'preferredquality': '192',
-                }],
-                'extractaudio': True,  # 确保提取音频
-                'keepvideo': True,     # 保留视频
-                'postprocessor_args': [
-                    '-vcodec', 'copy',  # 复制视频编码，避免重新编码
-                    '-acodec', 'aac',   # 使用AAC音频编码
-                ],
-            })
+            options.update(self._get_bilibili_options())
+        # 抖音/TikTok特殊配置
+        elif re.search(r'douyin\.com/|tiktok\.com/', self.url):
+            options.update(self._get_douyin_options())
+        # YouTube特殊配置
+        elif re.search(r'youtube\.com/|youtu\.be/', self.url):
+            options.update(self._get_youtube_options())
+        # 直播平台特殊配置
+        elif re.search(r'live\.|douyu\.com|huya\.com|twitch\.tv', self.url):
+            options.update(self._get_live_options())
+        # 音频平台特殊配置
+        elif re.search(r'music\.|\.com/track/|soundcloud\.com|ximalaya\.com', self.url):
+            options.update(self._get_audio_options())
 
-            # 添加cookies配置
-            if os.path.exists(self.cookies_file):
-                options.update({
-                    'cookiesfrombrowser': ('chrome',),
-                    'cookiefile': self.cookies_file,
-                })
+        # 添加cookies支持
+        cookies_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cookies.txt")
+        if os.path.exists(cookies_file):
+            options['cookiefile'] = cookies_file
 
         return options
+
+    def _get_bilibili_options(self):
+        """B站特殊配置"""
+        return {
+            'format': 'bestvideo*+bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4',
+            }, {
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'aac',
+                'preferredquality': '192',
+            }],
+            'extractaudio': True,
+            'keepvideo': True,
+        }
+
+    def _get_douyin_options(self):
+        """抖音特殊配置"""
+        return {
+            'format': 'best',
+            'cookiesfrombrowser': ('chrome',),
+        }
+
+    def _get_youtube_options(self):
+        """YouTube特殊配置"""
+        return {
+            'format': 'bestvideo*+bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4',
+            }],
+            'writesubtitles': True,
+            'writeautomaticsub': True,
+            'subtitleslangs': ['zh-Hans', 'zh-Hant', 'en'],
+        }
+
+    def _get_live_options(self):
+        """直播平台特殊配置"""
+        return {
+            'format': 'best',
+            'live_from_start': True,
+            'retry_sleep': 5,
+            'concurrent_fragment_downloads': 5,
+        }
+
+    def _get_audio_options(self):
+        """音频平台特殊配置"""
+        return {
+            'format': 'bestaudio/best',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '320',
+            }, {
+                'key': 'FFmpegMetadata',
+                'add_metadata': True,
+            }, {
+                'key': 'EmbedThumbnail',
+            }],
+            'writethumbnail': True,
+        }
 
     def download(self):
         """下载视频"""
@@ -672,15 +743,113 @@ def is_video_url(url):
     if not YTDLP_AVAILABLE:
         return False
     video_patterns = [
-        r'youtube\.com/watch\?v=',
-        r'youtu\.be/',
+        # 国内视频平台
         r'bilibili\.com/video/',
         r'b23\.tv/',
+        r'douyin\.com/',
+        r'ixigua\.com/',
+        r'kuaishou\.com/',
+        r'weibo\.com/',
+        r'qq\.com/x/cover/',
+        r'v\.qq\.com/',
+        r'mgtv\.com/',
+        r'iqiyi\.com/',
+        r'youku\.com/',
+        r'acfun\.cn/',
+        r'huya\.com/',
+        r'douyu\.com/',
+        r'haokan\.baidu\.com/',
+        r'pan\.baidu\.com/',
+        r'zhihu\.com/zvideo/',
+        r'xiaohongshu\.com/',
+        r'pipix\.com/',
+        r'ximalaya\.com/',
+        r'music\.163\.com/',
+        r'y\.qq\.com/',
+        r'kugou\.com/',
+        r'kuwo\.cn/',
+        r'dongchedi\.com/',
+        r'live\.bilibili\.com/',
+        r'live\.douyin\.com/',
+        r'panda\.tv/',
+        r'yy\.com/',
+
+        # 国外视频平台
+        r'youtube\.com/watch\?v=',
+        r'youtu\.be/',
+        r'vimeo\.com/',
+        r'dailymotion\.com/',
+        r'facebook\.com/.*?/videos/',
+        r'fb\.watch/',
+        r'instagram\.com/.*?/video/',
+        r'twitter\.com/.*/status/',
+        r'x\.com/.*/status/',
+        r'tiktok\.com/',
+        r'twitch\.tv/',
+        r'nicovideo\.jp/watch/',
+        r'reddit\.com/r/.*/comments/',
+        r'pornhub\.com/',
+        r'xvideos\.com/',
+        r'xhamster\.com/',
+        r'soundcloud\.com/',
+        r'spotify\.com/track/',
+        r'mixcloud\.com/',
+        r'vk\.com/video',
+        r'ok\.ru/video/',
+        r'rutube\.ru/',
+        r'metacafe\.com/',
+        r'vlive\.tv/',
+        r'naver\.com/video/',
+        r'line\.me/share/video/',
+        r'linkedin\.com/posts/',
+        r'tumblr\.com/post/',
+        r'pinterest\.com/pin/',
+        r'flickr\.com/photos/',
+        r'streamable\.com/',
+        r'streamja\.com/',
+        r'streamye\.com/',
+        r'streamvi\.com/',
+        r'clippituser\.tv/',
+        r'gfycat\.com/',
+        r'imgur\.com/',
+        r'9gag\.com/',
+        r'bitchute\.com/',
+        r'odysee\.com/',
+        r'rumble\.com/',
+        r'archive\.org/details/',
+
+        # 教育平台
+        r'coursera\.org/',
+        r'edx\.org/course/',
+        r'udemy\.com/course/',
+        r'skillshare\.com/',
+        r'lynda\.com/',
+        r'pluralsight\.com/',
+        r'brilliant\.org/',
+        r'masterclass\.com/',
+
+        # 通用视频格式
         r'\.mp4$',
         r'\.m3u8$',
         r'\.flv$',
         r'\.mkv$',
-        r'\.webm$'
+        r'\.webm$',
+        r'\.avi$',
+        r'\.mov$',
+        r'\.wmv$',
+        r'\.m4v$',
+        r'\.mpg$',
+        r'\.mpeg$',
+        r'\.3gp$',
+        r'\.ts$',
+        r'\.vob$',
+        r'\.ogv$',
+        r'\.mxf$',
+        r'\.f4v$',
+        r'\.rmvb$',
+        r'\.rm$',
+        r'\.asf$',
+        r'\.divx$'
     ]
     return any(re.search(pattern, url, re.I) for pattern in video_patterns)
 
@@ -937,6 +1106,81 @@ def delete_download():
             return jsonify({'status': 'error', 'message': '删除失败'}), 500
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/cookies')
+def cookies_page():
+    """渲染cookies管理页面"""
+    return render_template('cookies.html')
+
+
+@app.route('/save_cookies', methods=['POST'])
+def save_cookies():
+    """保存cookies"""
+    try:
+        data = request.json
+        platform = data.get('platform')
+        cookies = data.get('cookies')
+        
+        if not platform or not cookies:
+            return jsonify({'status': 'error', 'message': '参数错误'}), 400
+        
+        # 根据平台选择保存路径
+        if platform == 'bilibili':
+            filename = 'bilibili_cookies.txt'
+        elif platform == 'douyin':
+            filename = 'douyin_cookies.txt'
+        else:
+            filename = f'{platform}_cookies.txt'
+        
+        # 保存cookies文件
+        cookies_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), filename)
+        with open(cookies_path, 'w', encoding='utf-8') as f:
+            f.write(cookies)
+        
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        logging.error(f"保存cookies失败：{e}")
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+
+@app.route('/get_browser_cookies', methods=['POST'])
+def get_browser_cookies():
+    try:
+        data = request.get_json()
+        platform = data.get('platform')
+        browser = data.get('browser', 'chrome')  # 默认使用chrome
+        
+        if platform == 'douyin':
+            domain = '.douyin.com'
+        else:
+            return jsonify({'status': 'error', 'message': '不支持的平台'})
+            
+        if browser == 'chrome':
+            cookies = browser_cookie3.chrome(domain_name=domain)
+        elif browser == 'edge':
+            cookies = browser_cookie3.edge(domain_name=domain)
+        else:
+            return jsonify({'status': 'error', 'message': '不支持的浏览器'})
+            
+        cookie_str = ''
+        for cookie in cookies:
+            cookie_str += f'{cookie.name}={cookie.value}; '
+            
+        if not cookie_str:
+            return jsonify({'status': 'error', 'message': '未找到cookies，请确保已登录'})
+            
+        # 保存cookies到文件
+        cookies_dir = os.path.join(os.path.dirname(__file__), 'cookies')
+        os.makedirs(cookies_dir, exist_ok=True)
+        
+        with open(os.path.join(cookies_dir, f'{platform}.txt'), 'w', encoding='utf-8') as f:
+            f.write(cookie_str)
+            
+        return jsonify({'status': 'success'})
+    except Exception as e:
+        print(f"获取cookies失败: {str(e)}")
+        return jsonify({'status': 'error', 'message': str(e)})
 
 
 if __name__ == "__main__":
