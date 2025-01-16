@@ -5,12 +5,4 @@ pathvalidate
 yt-dlp>=2023.12.30
 python-magic>=0.4.27
 pathvalidate>=3.0.0
-browser-cookie3>=0.19.1
-
-# 注意：在Windows系统上还需要安装：
-# pip install python-magic-bin
-# 在Linux系统上需要安装：
-# sudo apt-get install libmagic1  # Ubuntu/Debian
-# sudo yum install file-libs      # CentOS/RHEL
-# 在macOS系统上需要安装：
-# brew install libmagic
+python-magic-bin
