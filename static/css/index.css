@@ -166,3 +166,15 @@ a {
     justify-content: space-between;
     margin-bottom: 5px;
 }
+.tips-list {
+    text-align: left;
+    margin: 10px auto;
+    width: 80%;
+    color: #666;
+    font-size: 14px;
+}
+
+.tips-list li {
+    margin: 5px 0;
+    line-height: 1.4;
+}

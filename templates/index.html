@@ -11,13 +11,19 @@
 <body>
     <div class="container">
         <h2>miaobox - 文件下载器</h2>
-        <input type="text" id="url" placeholder="请输入下载链接（支持普通文件和视频）">
+        <input type="text" id="url" placeholder="请输入下载链接（支持普通文件、B站和YouTube视频）">
         <input type="text" id="path" placeholder="请输入保存路径（选填）">
         <br>
         <button onclick="startDownload()">开始下载</button>
         <button onclick="cancelDownload()">取消下载</button>
         <button onclick="window.location.href='/cookies'" style="background-color: #2196F3;">管理Cookies</button>
         <p>提示：支持普通文件下载和视频下载（B站、YouTube等），系统会自动识别链接类型。如果是视频下载，无法出现进度属于正常现象。</p>
+        <p>YouTube视频下载说明：</p>
+        <ul class="tips-list">
+            <li>支持YouTube视频、播放列表链接</li>
+            <li>如需下载字幕，请在链接后添加 &sub=true</li>
+            <li>默认下载最高质量，如需指定质量请在链接后添加 &quality=720p</li>
+        </ul>
         <p>需要下载会员视频？<a href="/cookies">点击这里</a>导入cookies</p>
         
         <div id="progress-container">

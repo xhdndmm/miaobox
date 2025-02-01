@@ -27,10 +27,24 @@ function startDownload() {
     const progressContainer = document.getElementById('progress-container');
     progressContainer.style.display = 'block';
 
+    // 解析YouTube下载参数
+    const params = {};
+    if (url.includes('youtube.com') || url.includes('youtu.be')) {
+        const urlObj = new URL(url);
+        params.sub = urlObj.searchParams.get('sub') === 'true';
+        params.quality = urlObj.searchParams.get('quality');
+        // 清理URL中的参数
+        urlObj.searchParams.delete('sub');
+        urlObj.searchParams.delete('quality');
+        params.url = urlObj.toString();
+    } else {
+        params.url = url;
+    }
+
     fetch('/start_download', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url, path })
+        body: JSON.stringify({ ...params, path })
     })
     .then(response => {
         if (!response.ok) {
