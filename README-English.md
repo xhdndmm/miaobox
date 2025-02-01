@@ -152,7 +152,6 @@ A super simple file download tool that can help you download:
 
 - Try restarting the program if there are issues
 - If you encounter unsolvable problems, you can submit an issue on GitHub: https://github.com/xhdndmm/miaobox/issues
-- Or join the Telegram group: https://t.me/miaoboxbug
 
 ### Privacy Statement
 

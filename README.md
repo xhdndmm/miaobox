@@ -1,5 +1,5 @@
 # Miaobox 文件下载器
-中文版|[English](README-English.md)|[日本語](README_JP.md)
+中文版|[English](README-English.md)
 ## 这是什么？
 一个超级简单的文件下载工具，可以帮你下载：
 - 网络上的各种文件
@@ -152,7 +152,6 @@
 
 - 程序出现问题可以尝试重启
 - 如果遇到无法解决的问题，可以到GitHub提交问题：https://github.com/xhdndmm/miaobox/issues
-- 或者加入Telegram群：https://t.me/miaoboxbug
 
 ### 隐私说明
 
